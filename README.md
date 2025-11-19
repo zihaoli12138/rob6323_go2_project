@@ -14,13 +14,32 @@ This repository is the starter code for the NYU Reinforcement Learning and Optim
 
 ## Clone in $HOME
 
-- After logging into Greene, `cd` into your home directory and clone your fork into $HOME only, not elsewhere.  
+After logging into Greene, `cd` into your home directory (`cd $HOME`). You must clone your fork into `$HOME` only (not scratch or archive). This ensures subsequent scripts and paths resolve correctly on the cluster. Since this is a private repository, you need to authenticate with GitHub. You have two options:
+
+### Option A: Via VS Code (Recommended)
+The easiest way to avoid managing keys manually is to configure **VS Code Remote SSH**. If set up correctly, VS Code forwards your local credentials to the cluster.
+- Follow the [NYU HPC VS Code guide](https://sites.google.com/nyu.edu/nyu-hpc/training-support/general-hpc-topics/vs-code) to set up the connection.
+
+> **Tip:** Once connected to Greene in VS Code, you can clone directly without using the terminal:
+> 1. **Sign in to GitHub:** Click the "Accounts" icon (user profile picture) in the bottom-left sidebar. If you aren't signed in, click **"Sign in with GitHub"** and follow the browser prompts to authorize VS Code.
+> 2. **Clone the Repo:** Open the Command Palette (`Ctrl+Shift+P` or `Cmd+Shift+P`), type **Git: Clone**, and select it.
+> 3. **Paste URL:** Paste your repository's SSH URL (e.g., `git@github.com:...`) and press Enter.
+> 4. **Select Destination:** When prompted, select your home directory (`/home/<netid>/`) as the clone location.
+>
+> For more details, see the [VS Code Version Control Documentation](https://code.visualstudio.com/docs/sourcecontrol/intro-to-git#_clone-a-repository-locally).
+
+### Option B: Manual SSH Key Setup
+If you prefer using a standard terminal, you must generate a unique SSH key on the Greene cluster and add it to your GitHub account:
+1. **Generate a key:** Run the `ssh-keygen` command on Greene (follow the official [GitHub documentation on generating a new SSH key](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/generating-a-new-ssh-key-and-adding-it-to-the-ssh-agent#generating-a-new-ssh-key)).
+2. **Add the key to GitHub:** Copy the output of your public key (e.g., `cat ~/.ssh/id_ed25519.pub`) and add it to your account settings (follow the [GitHub documentation on adding a new SSH key](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/adding-a-new-ssh-key-to-your-github-account)).
+
+### Execute the Clone
+Once authenticated, run the following commands. Replace `<your-git-ssh-url>` with the SSH URL of your fork (e.g., `git@github.com:YOUR_USERNAME/rob6323_go2_project.git`).
 ```
 cd $HOME
-git clone rob6323_go2_project
+git clone <your-git-ssh-url> rob6323_go2_project
 ```
-This ensures subsequent scripts and paths resolve correctly on the cluster and during grading.
-
+*Note: You must ensure the target directory is named exactly `rob6323_go2_project`. This ensures subsequent scripts and paths resolve correctly on the cluster.*
 ## Install environment
 
 - Enter the project directory and run the installer to set up required dependencies and cluster-side tooling.  
