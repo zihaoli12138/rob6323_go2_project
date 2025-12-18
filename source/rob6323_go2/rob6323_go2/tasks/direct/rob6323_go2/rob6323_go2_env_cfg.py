@@ -80,6 +80,9 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     lin_vel_reward_scale = 1.0
     yaw_rate_reward_scale = 0.5
 
+    # v2: smoothness (discourage jerky actions)
+    action_rate_penalty_scale = 0.01
+
     # command ranges (Version 1: controlled sampling)
     command_lin_vel_x_range = (-1.0, 1.0)     # forward/backward
     command_lin_vel_y_range = (-0.05, 0.05)   # keep lateral small at first

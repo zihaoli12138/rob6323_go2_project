@@ -186,4 +186,24 @@ Students should only edit README.md below this line.
 - Removed the previous single-line sampling:
   - `uniform_(-1.0, 1.0)` on all three command components at once.
 
+## Download the rollout video (mp4) from Greene
+
+After training finishes on Greene, the rollout video is saved under `logs/<JOBID>/.../videos/play/`.
+
+### 1) Find the newest `rl-video-step-0.mp4` on Greene
+Run on Greene (inside the repo):
+
+```bash
+find logs -type f -name "rl-video-step-0.mp4" -printf "%T@ %p\n" | sort -nr | head -n 5
+
+
+realpath logs/<JOBID>/rsl_rl/go2_flat_direct/<RUN_TIMESTAMP>/videos/play/rl-video-step-0.mp4
+ls -l logs/<JOBID>/rsl_rl/go2_flat_direct/<RUN_TIMESTAMP>/videos/play/rl-video-step-0.mp4
+
+scp <NETID>@greene.hpc.nyu.edu:/home/<NETID>/rob6323_go2_project/logs/<JOBID>/rsl_rl/go2_flat_direct/<RUN_TIMESTAMP>/videos/play/rl-video-step-0.mp4 "C:\Users\<YOUR_USER>\Desktop\rl-video-<JOBID>.mp4"
+
+
+
+v2 plan (small change): Action-rate penalty + correct “previous action” tracking
+
 

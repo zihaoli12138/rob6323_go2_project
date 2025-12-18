@@ -43,7 +43,8 @@ class Rob6323Go2Env(DirectRLEnv):
             key: torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
             for key in [
                 "track_lin_vel_xy_exp",
-                "track_ang_vel_z_exp"
+                "track_ang_vel_z_exp"，
+                "pen_action_rate"，
             ]
         }
         # Get specific body indices
@@ -73,6 +74,7 @@ class Rob6323Go2Env(DirectRLEnv):
         light_cfg.func("/World/Light", light_cfg)
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
+        self._previous_actions = self._actions.clone()
         self._actions = actions.clone()
         self._processed_actions = self.cfg.action_scale * self._actions + self.robot.data.default_joint_pos
 
@@ -80,7 +82,6 @@ class Rob6323Go2Env(DirectRLEnv):
         self.robot.set_joint_position_target(self._processed_actions)
 
     def _get_observations(self) -> dict:
-        self._previous_actions = self._actions.clone()
         obs = torch.cat(
             [
                 tensor
@@ -101,6 +102,8 @@ class Rob6323Go2Env(DirectRLEnv):
         return observations
 
     def _get_rewards(self) -> torch.Tensor:
+
+        action_rate_sq = torch.sum(torch.square(self._actions - self._previous_actions), dim=1)
         # linear velocity tracking
         lin_vel_error = torch.sum(torch.square(self._commands[:, :2] - self.robot.data.root_lin_vel_b[:, :2]), dim=1)
         lin_vel_error_mapped = torch.exp(-lin_vel_error / 0.25)
@@ -111,6 +114,9 @@ class Rob6323Go2Env(DirectRLEnv):
         rewards = {
             "track_lin_vel_xy_exp": lin_vel_error_mapped * self.cfg.lin_vel_reward_scale * self.step_dt,
             "track_ang_vel_z_exp": yaw_rate_error_mapped * self.cfg.yaw_rate_reward_scale * self.step_dt,
+            
+            # v2: smoothness penalty (negative contribution)
+            "pen_action_rate": -action_rate_sq * self.cfg.action_rate_penalty_scale * self.step_dt,
         }
         reward = torch.sum(torch.stack(list(rewards.values())), dim=0)
         # Logging
