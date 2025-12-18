@@ -207,3 +207,29 @@ scp <NETID>@greene.hpc.nyu.edu:/home/<NETID>/rob6323_go2_project/logs/<JOBID>/rs
 v2 plan (small change): Action-rate penalty + correct “previous action” tracking
 
 
+## v3 — Base-level (roll/pitch) stabilization reward
+
+**Goal:** Improve locomotion stability by discouraging excessive base tilt (roll/pitch) while still prioritizing command tracking.
+This is *not* “human upright”; for a quadruped it means keeping the trunk/base level so the robot does not tip or collapse.
+
+**Files modified:**
+- `source/rob6323_go2/rob6323_go2/tasks/direct/rob6323_go2/rob6323_go2_env.py`
+- `source/rob6323_go2/rob6323_go2/tasks/direct/rob6323_go2/rob6323_go2_env_cfg.py`
+
+### Key change
+1. **Base-level reward (new):**
+   - Uses `projected_gravity_b` from Isaac Lab.
+   - When the base is level, `projected_gravity_b[:, :2]` is near zero.
+   - Reward:  
+     \[
+       r_{level}=\exp\left(-\frac{\|g_{xy}\|^2}{\sigma}\right)
+     \]
+     where \(g_{xy}\) is the x/y components of projected gravity in the base frame.
+
+### New config parameters
+In `rob6323_go2_env_cfg.py`:
+- `base_level_reward_scale` — scale for the base leveling reward term
+- `base_level_sigma` — sensitivity (smaller = stronger push to stay level)
+
+### Logging
+- Added `base_level_exp` to `Episode_Reward/*` logs for TensorBoard.

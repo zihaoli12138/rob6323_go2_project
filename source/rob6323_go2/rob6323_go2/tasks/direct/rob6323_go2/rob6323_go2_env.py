@@ -43,8 +43,9 @@ class Rob6323Go2Env(DirectRLEnv):
             key: torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
             for key in [
                 "track_lin_vel_xy_exp",
-                "track_ang_vel_z_exp"，
-                "pen_action_rate"，
+                "track_ang_vel_z_exp",
+                "pen_action_rate",
+                "base_level_exp", 
             ]
         }
         # Get specific body indices
@@ -102,6 +103,11 @@ class Rob6323Go2Env(DirectRLEnv):
         return observations
 
     def _get_rewards(self) -> torch.Tensor:
+        
+        # v3: base leveling reward (penalize roll/pitch tilt)
+        base_level_error = torch.sum(torch.square(self.robot.data.projected_gravity_b[:, :2]), dim=1)
+        base_level_mapped = torch.exp(-base_level_error / self.cfg.base_level_sigma)
+
 
         action_rate_sq = torch.sum(torch.square(self._actions - self._previous_actions), dim=1)
         # linear velocity tracking
@@ -117,6 +123,7 @@ class Rob6323Go2Env(DirectRLEnv):
             
             # v2: smoothness penalty (negative contribution)
             "pen_action_rate": -action_rate_sq * self.cfg.action_rate_penalty_scale * self.step_dt,
+            "base_level_exp": base_level_mapped * self.cfg.base_level_reward_scale * self.step_dt,
         }
         reward = torch.sum(torch.stack(list(rewards.values())), dim=0)
         # Logging
