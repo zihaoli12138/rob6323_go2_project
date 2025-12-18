@@ -32,7 +32,7 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     debug_vis = True
 
     # ---------------------------
-    # Rewards (baseline + yours)
+    # Rewards 
     # ---------------------------
     lin_vel_reward_scale = 1.0
     yaw_rate_reward_scale = 0.5
@@ -44,8 +44,8 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     raibert_heuristic_reward_scale = -10.0
 
     # your shaping (set to 0.0 to disable)
-    base_level_reward_scale = 0.0
-    base_height_reward_scale = 0.0
+    base_level_reward_scale = 0.5
+    base_height_reward_scale = 0.55
 
     # exp mapping denominators (bigger => gentler)
     base_level_exp_denom = 0.25
@@ -57,10 +57,14 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     # termination threshold
     base_height_min = 0.20  # terminate if base < 20 cm
 
-    # your v1 controlled command sampling
+    # v1 controlled command sampling
     command_lin_vel_x_range = (-1.0, 1.0)
     command_lin_vel_y_range = (-0.05, 0.05)
     command_yaw_rate_range  = (-1.0, 1.0)
+
+    # v5 heading / yaw tracking
+    heading_reward_scale = 0.5      # start 0.2~1.0; increase if still drifting
+    heading_exp_denom    = 0.25     # ~ (0.5 rad)^2; smaller => stricter
 
     # ---------------------------
     # Simulation

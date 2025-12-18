@@ -246,3 +246,6 @@ Keeps the baseline tutorial components (torque-level PD, action-history smoothne
 Preserves earlier incremental changes 
 
 Adds optional exp-shaped posture terms (base_level_exp, base_height_exp) that can be enabled by setting base_level_reward_scale / base_height_reward_scale > 0.
+
+## v5
+try to make the robot facing the direction
