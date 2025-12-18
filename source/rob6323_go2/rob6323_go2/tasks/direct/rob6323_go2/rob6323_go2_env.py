@@ -46,6 +46,7 @@ class Rob6323Go2Env(DirectRLEnv):
                 "track_ang_vel_z_exp",
                 "pen_action_rate",
                 "base_level_exp", 
+                "base_height_exp",
             ]
         }
         # Get specific body indices
@@ -116,14 +117,20 @@ class Rob6323Go2Env(DirectRLEnv):
         # yaw rate tracking
         yaw_rate_error = torch.square(self._commands[:, 2] - self.robot.data.root_ang_vel_b[:, 2])
         yaw_rate_error_mapped = torch.exp(-yaw_rate_error / 0.25)
-        
+        #v4 hight
+        height_error = torch.square(self.robot.data.root_pos_w[:, 2] - self.cfg.base_height_target)
+        height_mapped = torch.exp(-height_error / self.cfg.base_height_sigma)
+
         rewards = {
             "track_lin_vel_xy_exp": lin_vel_error_mapped * self.cfg.lin_vel_reward_scale * self.step_dt,
             "track_ang_vel_z_exp": yaw_rate_error_mapped * self.cfg.yaw_rate_reward_scale * self.step_dt,
             
             # v2: smoothness penalty (negative contribution)
             "pen_action_rate": -action_rate_sq * self.cfg.action_rate_penalty_scale * self.step_dt,
+            #v3
             "base_level_exp": base_level_mapped * self.cfg.base_level_reward_scale * self.step_dt,
+            # v4
+            "base_height_exp": height_mapped * self.cfg.base_height_reward_scale * self.step_dt,
         }
         reward = torch.sum(torch.stack(list(rewards.values())), dim=0)
         # Logging

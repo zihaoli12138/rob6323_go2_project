@@ -201,7 +201,7 @@ realpath logs/<JOBID>/rsl_rl/go2_flat_direct/<RUN_TIMESTAMP>/videos/play/rl-vide
 ls -l logs/<JOBID>/rsl_rl/go2_flat_direct/<RUN_TIMESTAMP>/videos/play/rl-video-step-0.mp4
 
 scp <NETID>@greene.hpc.nyu.edu:/home/<NETID>/rob6323_go2_project/logs/<JOBID>/rsl_rl/go2_flat_direct/<RUN_TIMESTAMP>/videos/play/rl-video-step-0.mp4 "C:\Users\<YOUR_USER>\Desktop\rl-video-<JOBID>.mp4"
-
+```
 
 
 v2 plan (small change): Action-rate penalty + correct “previous action” tracking
@@ -233,3 +233,10 @@ In `rob6323_go2_env_cfg.py`:
 
 ### Logging
 - Added `base_level_exp` to `Episode_Reward/*` logs for TensorBoard.
+
+
+## V4 
+
+Make the base level to higher.
+
+Maybe helpful for not draging the body.
