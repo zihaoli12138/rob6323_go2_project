@@ -237,6 +237,12 @@ In `rob6323_go2_env_cfg.py`:
 
 ## V4 
 
-Make the base level to higher.
+Add something like this under a “Versions” or “Changelog” header:
 
-Maybe helpful for not draging the body.
+v4 (baseline-merged): PD torque control + gait clock + Raibert scaffold, with controlled command ranges
+
+Keeps the baseline tutorial components (torque-level PD, action-history smoothness, gait clock inputs, Raibert heuristic term, base-height termination).
+
+Preserves earlier incremental changes 
+
+Adds optional exp-shaped posture terms (base_level_exp, base_height_exp) that can be enabled by setting base_level_reward_scale / base_height_reward_scale > 0.
