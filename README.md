@@ -165,3 +165,25 @@ The suggested way to inspect these logs is via the Open OnDemand web interface:
 
 ---
 Students should only edit README.md below this line.
+
+## Change Log
+
+### v1 — Controlled Command Sampling (2025-12-18)
+
+**Goal:** Make training behavior more stable/interpretable by sampling velocity commands from explicit per-dimension ranges (instead of uniform `[-1, 1]` for all command components).
+
+#### 1) `rob6323_go2_env_cfg.py` changes
+- Added configurable command ranges:
+  - `command_lin_vel_x_range = (-1.0, 1.0)`
+  - `command_lin_vel_y_range = (-0.05, 0.05)` (kept small to discourage lateral-only motion)
+  - `command_yaw_rate_range  = (-1.0, 1.0)`
+
+#### 2) `rob6323_go2_env.py` changes
+- Updated `_reset_idx()` to sample commands per dimension using the config ranges:
+  - `self._commands[:, 0]` sampled from `command_lin_vel_x_range`
+  - `self._commands[:, 1]` sampled from `command_lin_vel_y_range`
+  - `self._commands[:, 2]` sampled from `command_yaw_rate_range`
+- Removed the previous single-line sampling:
+  - `uniform_(-1.0, 1.0)` on all three command components at once.
+
+
