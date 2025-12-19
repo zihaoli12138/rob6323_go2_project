@@ -20,26 +20,22 @@ from isaaclab.utils import configclass
 
 @configclass
 class Rob6323Go2RoughTerrainCfg(TerrainGeneratorCfg):
-    """Configuration for procedurally generated uneven terrain."""
+    """Simplified configuration for noisy uneven terrain."""
     size = (8.0, 8.0)
     border_width = 20.0
     num_rows = 10
     num_cols = 20
     horizontal_scale = 0.1
     vertical_scale = 0.005
-    slope_threshold = 0.75
     use_cache = False
-    curriculum = True  # Enable curriculum to start on flat rows first
+    curriculum = False  # Disable curriculum for stability without perception
     
     sub_terrains = {
-        "pyramid_stairs": terrain_gen.HfPyramidStairsTerrainCfg(
-            proportion=0.4, step_width=0.31, step_height_range=(0.05, 0.15)
-        ),
         "random_uniform": terrain_gen.HfRandomUniformTerrainCfg(
-            proportion=0.4, noise_range=(0.02, 0.08), noise_step=0.02, downsampled_scale=0.2
-        ),
-        "sloped": terrain_gen.HfPyramidSlopedTerrainCfg(
-            proportion=0.2, slope_range=(0.0, 0.3)
+            proportion=1.0, 
+            noise_range=(0.01, 0.05), # 1-5cm bumps to test proprioceptive robustness
+            noise_step=0.01, 
+            downsampled_scale=0.2
         ),
     }
 
@@ -52,7 +48,7 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     # spaces
     action_scale = 0.25
     action_space = 12
-    observation_space = 48 + 4  # (If adding height scan later, increase this number)
+    observation_space = 48 + 4 
     state_space = 0
     debug_vis = True
 
@@ -70,7 +66,7 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     base_level_exp_denom = 0.25
     base_height_exp_denom = 0.02
 
-    # base height target (slightly higher for rough terrain clearance)
+    # base height target
     base_height_target = 0.38
     base_height_min = 0.20  
 
@@ -100,10 +96,10 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
         ),
     )
 
-    # --- UPDATED FOR BONUS V2: ROUGH TERRAIN ---
+    # --- SIMPLIFIED ROUGH TERRAIN ---
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",
-        terrain_type="generator", # Switch from 'plane' to 'generator'
+        terrain_type="generator", 
         terrain_generator=Rob6323Go2RoughTerrainCfg(),
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(

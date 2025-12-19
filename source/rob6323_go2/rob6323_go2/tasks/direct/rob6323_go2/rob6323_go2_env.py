@@ -115,7 +115,7 @@ class Rob6323Go2Env(DirectRLEnv):
         self.desired_joint_pos = self.cfg.action_scale * self._actions + self.robot.data.default_joint_pos
 
     def _apply_action(self) -> None:
-        # PD torques
+        # Calculate PD torques
         torques = self.Kp * (self.desired_joint_pos - self.robot.data.joint_pos) - self.Kd * self.robot.data.joint_vel
         
         # --- BONUS TASK 1: Friction Model ---
@@ -128,7 +128,6 @@ class Rob6323Go2Env(DirectRLEnv):
         self.robot.set_joint_effort_target(torques)
 
     def _get_observations(self) -> dict:
-        # Note: If you implement a height scanner for Bonus 2, add it to this cat
         obs = torch.cat(
             [
                 t
@@ -173,7 +172,6 @@ class Rob6323Go2Env(DirectRLEnv):
         gravity_xy_sq = torch.sum(self.robot.data.projected_gravity_b[:, :2] ** 2, dim=1)
         base_level_mapped = torch.exp(-gravity_xy_sq / self.cfg.base_level_exp_denom)
 
-        # Use root_pos_w relative to terrain height if possible, otherwise raw world Z
         base_height = self.robot.data.root_pos_w[:, 2]
         height_err_sq = (base_height - self.cfg.base_height_target) ** 2
         height_mapped = torch.exp(-height_err_sq / self.cfg.base_height_exp_denom)
@@ -212,7 +210,6 @@ class Rob6323Go2Env(DirectRLEnv):
         )
         upside_down = self.robot.data.projected_gravity_b[:, 2] > 0.0
         
-        # Min height check
         base_height = self.robot.data.root_pos_w[:, 2]
         too_low = base_height < self.cfg.base_height_min
 
@@ -222,10 +219,6 @@ class Rob6323Go2Env(DirectRLEnv):
     def _reset_idx(self, env_ids: Sequence[int] | None):
         if env_ids is None or len(env_ids) == self.num_envs:
             env_ids = self.robot._ALL_INDICES
-
-        # Bonus 2: Curriculum-based terrain reset
-        if self.cfg.terrain.terrain_type == "generator":
-            self._terrain.update_step(env_ids)
 
         self.robot.reset(env_ids)
         super()._reset_idx(env_ids)
@@ -241,7 +234,7 @@ class Rob6323Go2Env(DirectRLEnv):
         self._previous_actions[env_ids] = 0.0
         self._torques[env_ids] = 0.0
 
-        # Command ranges
+        # Commands
         self._commands[env_ids, 0] = torch.empty(len(env_ids), device=self.device).uniform_(*self.cfg.command_lin_vel_x_range)
         self._commands[env_ids, 1] = torch.empty(len(env_ids), device=self.device).uniform_(*self.cfg.command_lin_vel_y_range)
         self._commands[env_ids, 2] = torch.empty(len(env_ids), device=self.device).uniform_(*self.cfg.command_yaw_rate_range)
@@ -267,7 +260,6 @@ class Rob6323Go2Env(DirectRLEnv):
         self.clock_inputs[env_ids] = 0.0
         self.desired_contact_states[env_ids] = 0.0
 
-    # --- Debug Viz ---
     def _set_debug_vis_impl(self, debug_vis: bool):
         if debug_vis:
             if not hasattr(self, "goal_vel_visualizer"):
