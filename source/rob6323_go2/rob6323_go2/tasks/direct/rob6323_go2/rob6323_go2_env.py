@@ -30,10 +30,13 @@ class Rob6323Go2Env(DirectRLEnv):
         self._actions = torch.zeros(self.num_envs, gym.spaces.flatdim(self.single_action_space), device=self.device)
         self._previous_actions = torch.zeros_like(self._actions)
 
+        # store applied torques for torque regularization (anti-hop)
+        self._torques = torch.zeros_like(self._actions)
+
         # commands: [vx, vy, yaw_rate]
         self._commands = torch.zeros(self.num_envs, 3, device=self.device)
 
-        # logging (baseline + your shaping keys)
+        # logging (baseline + your shaping keys + anti-hop keys)
         self._episode_sums = {
             key: torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
             for key in [
@@ -43,6 +46,11 @@ class Rob6323Go2Env(DirectRLEnv):
                 "raibert_heuristic",
                 "base_level_exp",
                 "base_height_exp",
+                # anti-hop regularizers
+                "lin_vel_z_l2",
+                "ang_vel_xy_l2",
+                "torque_l2",
+                "dof_vel_l2",
             ]
         }
 
@@ -108,6 +116,10 @@ class Rob6323Go2Env(DirectRLEnv):
     def _apply_action(self) -> None:
         torques = self.Kp * (self.desired_joint_pos - self.robot.data.joint_pos) - self.Kd * self.robot.data.joint_vel
         torques = torch.clip(torques, -self.torque_limits, self.torque_limits)
+
+        # save torques for regularization
+        self._torques[:] = torques
+
         self.robot.set_joint_effort_target(torques)
 
     def _get_observations(self) -> dict:
@@ -159,6 +171,13 @@ class Rob6323Go2Env(DirectRLEnv):
         height_err_sq = (base_height - self.cfg.base_height_target) ** 2
         height_mapped = torch.exp(-height_err_sq / self.cfg.base_height_exp_denom)
 
+        # ---------------- anti-hop regularizers ----------------
+        # hopping shows up as large vertical base velocity and base rocking (roll/pitch rates)
+        lin_vel_z_l2 = self.robot.data.root_lin_vel_b[:, 2] ** 2
+        ang_vel_xy_l2 = torch.sum(self.robot.data.root_ang_vel_b[:, :2] ** 2, dim=1)
+        torque_l2 = torch.sum(self._torques ** 2, dim=1)
+        dof_vel_l2 = torch.sum(self.robot.data.joint_vel ** 2, dim=1)
+
         rewards = {
             "track_lin_vel_xy_exp": lin_vel_error_mapped * self.cfg.lin_vel_reward_scale * self.step_dt,
             "track_ang_vel_z_exp": yaw_rate_error_mapped * self.cfg.yaw_rate_reward_scale * self.step_dt,
@@ -166,6 +185,11 @@ class Rob6323Go2Env(DirectRLEnv):
             "raibert_heuristic": rew_raibert_heuristic * self.cfg.raibert_heuristic_reward_scale * self.step_dt,
             "base_level_exp": base_level_mapped * self.cfg.base_level_reward_scale * self.step_dt,
             "base_height_exp": height_mapped * self.cfg.base_height_reward_scale * self.step_dt,
+            # anti-hop (all are costs => cfg scales should be negative)
+            "lin_vel_z_l2": lin_vel_z_l2 * self.cfg.lin_vel_z_reward_scale * self.step_dt,
+            "ang_vel_xy_l2": ang_vel_xy_l2 * self.cfg.ang_vel_xy_reward_scale * self.step_dt,
+            "torque_l2": torque_l2 * self.cfg.torque_reward_scale * self.step_dt,
+            "dof_vel_l2": dof_vel_l2 * self.cfg.dof_vel_reward_scale * self.step_dt,
         }
 
         reward = torch.sum(torch.stack(list(rewards.values())), dim=0)
@@ -200,6 +224,7 @@ class Rob6323Go2Env(DirectRLEnv):
 
         self._actions[env_ids] = 0.0
         self._previous_actions[env_ids] = 0.0
+        self._torques[env_ids] = 0.0
 
         # your v1 command ranges
         self._commands[env_ids, 0] = torch.empty(len(env_ids), device=self.device).uniform_(*self.cfg.command_lin_vel_x_range)

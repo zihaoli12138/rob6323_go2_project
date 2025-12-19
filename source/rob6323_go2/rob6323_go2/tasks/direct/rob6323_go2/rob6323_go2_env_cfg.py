@@ -57,6 +57,12 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     # termination threshold
     base_height_min = 0.20  # terminate if base < 20 cm
 
+    # Anti-hop regularizers
+    lin_vel_z_reward_scale = -2.0      # (v_z)^2
+    ang_vel_xy_reward_scale = -0.05    # (ωx^2 + ωy^2)
+    torque_reward_scale = -2.0e-5      # sum(τ^2)  (VERY small)
+    dof_vel_reward_scale = -1.0e-4     # sum(qd^2) (small)
+
     # your v1 controlled command sampling
     command_lin_vel_x_range = (-1.0, 1.0)
     command_lin_vel_y_range = (-0.05, 0.05)
