@@ -38,7 +38,7 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     yaw_rate_reward_scale = 0.5
 
     # baseline: action smoothness (note: negative)
-    action_rate_reward_scale = -0.05
+    action_rate_reward_scale = -0.0001
 
     # baseline: Raibert heuristic (note: negative; set to 0.0 to disable)
     raibert_heuristic_reward_scale = -20.0
