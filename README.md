@@ -288,3 +288,34 @@ v5 did not work
     * This change scales the 20-second episode total into a representative **1.0-second (50-step)** sum for the Y-axis.
     * Verified that **track_lin_vel_xy_exp** plateaus at **~49.0** (Target: ~48) and **track_ang_vel_z_exp** plateaus at **~24.5** (Target: ~24).
     * Final visual check confirmed high alignment between the **green arrow** (command) and **blue arrow** (actual velocity).
+
+---
+
+## Usage
+
+### 1. Training the Policy
+To start the training process on the remote cluster using the finalized configuration, run the submission script:
+
+./train.sh
+
+### 2. Evaluating the Policy (Play)
+To visualize the trained agent in the simulator and verify that the actual velocity (blue arrow) matches the commanded velocity (green arrow), run the evaluation script:
+
+python source/rob6323_go2/rob6323_go2/scripts/rsl_rl/play.py --task rob6323_go2 --num_envs 32 --checkpoint logs/<JOB_ID>/rsl_rl/go2_flat_direct/<DATE_TIME>/model_X.pt
+
+### 3. Monitoring with TensorBoard
+To verify that the model hits the quantitative targets (~48 for linear velocity and ~24 for yaw rate), launch TensorBoard locally:
+
+# Navigate to your local log directory
+tensorboard --logdir .
+
+* Metrics: Look for Episode_Reward/track_lin_vel_xy_exp and Episode_Reward/track_ang_vel_z_exp in the Scalars tab.
+* Scaling: The Y-axis represents the reward sum over a 1.0-second (50-step) average window.
+
+### 4. Syncing Data from Remote Cluster
+To download evaluation videos or training logs to your local machine for analysis, use scp:
+
+# Example for downloading an evaluation video
+scp <username>@<remote_host>:/path/to/project/logs/<JOB_ID>/.../videos/play/rl-video-step-0.mp4 ./evaluation_video.mp4
+
+---
