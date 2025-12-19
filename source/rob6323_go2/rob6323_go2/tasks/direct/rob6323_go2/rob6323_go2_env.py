@@ -252,7 +252,7 @@ class Rob6323Go2Env(DirectRLEnv):
 
         extras = {}
         for k in self._episode_sums.keys():
-            extras["Episode_Reward/" + k] = torch.mean(self._episode_sums[k][env_ids]) / self.max_episode_length_s / 20
+            extras["Episode_Reward/" + k] = torch.mean(self._episode_sums[k][env_ids]) / (self.max_episode_length_s / 50)
             self._episode_sums[k][env_ids] = 0.0
 
         self.extras["log"] = dict(extras)
