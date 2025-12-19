@@ -43,22 +43,15 @@ class Rob6323Go2Env(DirectRLEnv):
         self._commands = torch.zeros(self.num_envs, 3, device=self.device)
 
         # logging - Including TA required metrics
+        reward_keys = [
+            "track_lin_vel_xy_exp", "track_ang_vel_z_exp", "rew_action_rate",
+            "raibert_heuristic", "base_level_exp", "base_height_exp",
+            "lin_vel_z_l2", "ang_vel_xy_l2", "torque_l2", "dof_vel_l2",
+            "feet_clearance", "contacts_shaped_force"
+        ]
         self._episode_sums = {
             key: torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
-            for key in [
-                "track_lin_vel_xy_exp",
-                "track_ang_vel_z_exp",
-                "rew_action_rate",
-                "raibert_heuristic",
-                "base_level_exp",
-                "base_height_exp",
-                "lin_vel_z_l2",
-                "ang_vel_xy_l2",
-                "torque_l2",
-                "dof_vel_l2",
-                "feet_clearance",
-                "contacts_shaped_force"
-            ]
+            for key in reward_keys
         }
 
         self._base_id, _ = self._contact_sensor.find_bodies("base")
@@ -121,7 +114,7 @@ class Rob6323Go2Env(DirectRLEnv):
         self.desired_joint_pos = self.cfg.action_scale * self._actions + self.robot.data.default_joint_pos
 
     def _apply_action(self) -> None:
-        # Update Raycaster (Mandatory for uneven terrain)
+        # Update Raycaster (CRITICAL: RayCasters do not update automatically in Isaac Lab)
         self._height_scanner.update(self.step_dt)
 
         # Calculate PD torques
@@ -138,6 +131,7 @@ class Rob6323Go2Env(DirectRLEnv):
 
     def _get_observations(self) -> dict:
         # Relative height scan (187 points)
+        # Use .data.pos_w to get the world coordinates and subtract base height
         height_scan = self._height_scanner.data.pos_w[:, :, 2] - self.robot.data.root_pos_w[:, 2].unsqueeze(1)
         
         obs = torch.cat(
@@ -150,7 +144,7 @@ class Rob6323Go2Env(DirectRLEnv):
                 self.robot.data.joint_vel,
                 self._actions,
                 self.clock_inputs,
-                height_scan, 
+                height_scan, # Total dimensions should now be 239
             ],
             dim=-1,
         )
@@ -178,14 +172,15 @@ class Rob6323Go2Env(DirectRLEnv):
         rew_raibert_heuristic = self._reward_raibert_heuristic()
 
         # --- TA Required Rewards ---
-        # Foot Clearance
+        # Foot Clearance Arc
         phases = 1 - torch.abs(1.0 - torch.clip((self.foot_indices * 2.0) - 1.0, 0.0, 1.0) * 2.0)
         foot_height = self.foot_positions_w[:, :, 2]
         target_height = 0.08 * phases + 0.02
+        # Penalize when foot is in swing (desired_contact_states == 0)
         rew_foot_clearance = torch.square(target_height - foot_height) * (1 - self.desired_contact_states)
         rew_feet_clearance = torch.sum(rew_foot_clearance, dim=1)
 
-        # Tracking Contacts Shaped Force
+        # Tracking Contacts Shaped Force (Net forces from contact sensor data)
         foot_forces = torch.norm(self._contact_sensor.data.net_forces_w_history[:, 0, self._feet_ids], dim=-1)
         rew_tracking_contacts_shaped_force = 0.
         for i in range(4):

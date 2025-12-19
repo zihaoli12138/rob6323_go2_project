@@ -12,7 +12,7 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.markers import VisualizationMarkersCfg
 from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, GREEN_ARROW_X_MARKER_CFG
 from isaaclab.scene import InteractiveSceneCfg
-from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns
+from isaaclab.sensors import ContactSensorCfg
 from isaaclab.sim import SimulationCfg
 from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG
@@ -20,7 +20,7 @@ from isaaclab.utils import configclass
 
 @configclass
 class EventCfg:
-    """Configuration for domain randomization."""
+    """Configuration for randomization."""
     physics_material = EventTerm(
         func=mdp.randomize_rigid_body_material,
         mode="startup",
@@ -48,22 +48,22 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     episode_length_s = 20.0
     action_scale = 0.25
     action_space = 12
-    # Base(48) + Clock(4) + HeightScanner(187) = 239
-    observation_space = 239 
+    # Base (48) + Clock (4) = 52
+    observation_space = 52 
     debug_vis = True
 
     # --- TA Specified Reward Scales ---
-    feet_clearance_reward_scale = -200.0  # Arc tracking penalty
-    tracking_contacts_shaped_force_reward_scale = 1.0  # Swing phase penalty
+    feet_clearance_reward_scale = -200.0  
+    tracking_contacts_shaped_force_reward_scale = 1.0  
     
-    # --- Existing Rewards ---
+    # --- Baseline Rewards (v10) ---
     lin_vel_reward_scale = 1.0
     yaw_rate_reward_scale = 0.5
     action_rate_reward_scale = -0.0001
     raibert_heuristic_reward_scale = -20.0
     base_level_reward_scale = 0.10
     base_height_reward_scale = 0.60
-    flat_orientation_reward_scale = 0.0 # Allow tilting on rough terrain
+    flat_orientation_reward_scale = 0.0 # Critical for uneven terrain
     
     lin_vel_z_reward_scale = -2.0
     ang_vel_xy_reward_scale = -0.05
@@ -93,14 +93,6 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
             static_friction=1.0,
             dynamic_friction=1.0,
         ),
-    )
-
-    height_scanner = RayCasterCfg(
-        prim_path="/World/envs/env_.*/Robot/base",
-        offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
-        ray_alignment="yaw",
-        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.6, 1.0]),
-        mesh_prim_paths=["/World/ground"],
     )
 
     scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=4.0, replicate_physics=True)
