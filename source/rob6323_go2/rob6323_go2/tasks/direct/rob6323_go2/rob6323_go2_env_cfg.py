@@ -20,27 +20,31 @@ from isaaclab.utils import configclass
 
 @configclass
 class Rob6323Go2EnvCfg(DirectRLEnvCfg):
-    # env
+    # ---------------------------
+    # Env
+    # ---------------------------
     decimation = 4
     episode_length_s = 20.0
 
-    # spaces
+    # ---------------------------
+    # Spaces
+    # ---------------------------
     action_scale = 0.25
     action_space = 12
-    observation_space = 48 + 4  # baseline adds 4 clock inputs
+    observation_space = 48 + 4  # 48 base + 4 gait clock inputs
     state_space = 0
     debug_vis = True
 
     # ---------------------------
-    # Rewards 
+    # Rewards
     # ---------------------------
     lin_vel_reward_scale = 1.0
     yaw_rate_reward_scale = 0.5
 
-    # baseline: action smoothness (note: negative)
+    # baseline: action smoothness (negative)
     action_rate_reward_scale = -0.1
 
-    # baseline: Raibert heuristic (note: negative; set to 0.0 to disable)
+    # baseline: Raibert heuristic (negative; set to 0.0 to disable)
     raibert_heuristic_reward_scale = -10.0
 
     # your shaping (set to 0.0 to disable)
@@ -54,17 +58,24 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     # base height target for shaping reward (world z)
     base_height_target = 0.32
 
-    # termination threshold
+    # v5 heading / yaw tracking (kept OFF initially)
+    heading_reward_scale = 0.0   # keep 0 while you fix tracking; later try 0.2~1.0
+    heading_exp_denom = 0.25     # smaller => stricter
+
+    # ---------------------------
+    # Termination
+    # ---------------------------
     base_height_min = 0.20  # terminate if base < 20 cm
 
-    # v1 controlled command sampling
+    # ---------------------------
+    # Command sampling + smoothing (slowly changing commands)
+    # ---------------------------
     command_lin_vel_x_range = (-1.0, 1.0)
-    command_lin_vel_y_range = (-0.05, 0.05)
-    command_yaw_rate_range  = (-1.0, 1.0)
+    command_lin_vel_y_range = (-0.5, 0.5)
+    command_yaw_rate_range = (-1.0, 1.0)
 
-    # v5 heading / yaw tracking
-    heading_reward_scale = 0.5      # start 0.2~1.0; increase if still drifting
-    heading_exp_denom    = 0.25     # ~ (0.5 rad)^2; smaller => stricter
+    command_resample_time_s = 3.0   # resample command target every 3s
+    command_smoothing_tau_s = 0.5   # larger => smoother/slower transitions
 
     # ---------------------------
     # Simulation
@@ -96,7 +107,7 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     )
 
     # ---------------------------
-    # Robot: disable implicit PD; we do torque-level PD
+    # Robot: disable implicit PD; we do torque-level PD in env.py
     # ---------------------------
     Kp = 20.0
     Kd = 0.5
@@ -114,7 +125,11 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     # ---------------------------
     # Scene / sensors / debug markers
     # ---------------------------
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=4.0, replicate_physics=True)
+    scene: InteractiveSceneCfg = InteractiveSceneCfg(
+        num_envs=4096,
+        env_spacing=4.0,
+        replicate_physics=True,
+    )
 
     contact_sensor: ContactSensorCfg = ContactSensorCfg(
         prim_path="/World/envs/env_.*/Robot/.*",
