@@ -318,3 +318,16 @@ To download evaluation videos or training logs to your local machine for analysi
 scp <username>@<remote_host>:/path/to/project/logs/<JOB_ID>/.../videos/play/rl-video-step-0.mp4 ./evaluation_video.mp4
 
 ---
+
+
+
+
+
+
+## bonus_v1: Actuator Friction Model (Sim-to-Real)
+* **Goal**: Implement a realistic actuator friction/viscous model to narrow the sim-to-real gap for potential real-robot deployment (+5 pts bonus).
+* **Changes**:
+    * **Initialization**: Added `mu_v` (viscous coefficient) and `f_s` (stiction coefficient) tensors to the environment.
+    * **Randomization**: Implemented per-episode randomization in `_reset_idx` with ranges $\mu_v \sim \mathcal{U}(0.0, 0.3)$ and $F_s \sim \mathcal{U}(0.0, 2.5)$.
+    * **Physics Implementation**: Updated `_apply_action` to calculate $\tau_{friction} = F_s \cdot \tanh(\dot{q} / 0.1) + \mu_v \cdot \dot{q}$ and subtract it from the PD torque output before sending it to the simulation.
+* **Impact**: Forces the policy to become robust to internal joint resistance, significantly narrowing the gap between simulation and real-world behavior.
