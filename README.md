@@ -186,9 +186,6 @@ Students should only edit README.md below this line.
 - Removed the previous single-line sampling:
   - `uniform_(-1.0, 1.0)` on all three command components at once.
 
-## Download the rollout video (mp4) from Greene
-
-After training finishes on Greene, the rollout video is saved under `logs/<JOBID>/.../videos/play/`.
 
 ### 1) Find the newest `rl-video-step-0.mp4` on Greene
 Run on Greene (inside the repo):
@@ -204,17 +201,14 @@ scp <NETID>@greene.hpc.nyu.edu:/home/<NETID>/rob6323_go2_project/logs/<JOBID>/rs
 ```
 
 
-v2 plan (small change): Action-rate penalty + correct “previous action” tracking
+v2 plan : Action-rate penalty + correct “previous action” tracking
 
 
-## v3 — Base-level (roll/pitch) stabilization reward
+## v3 — Base-level  stabilization reward
 
 **Goal:** Improve locomotion stability by discouraging excessive base tilt (roll/pitch) while still prioritizing command tracking.
 This is *not* “human upright”; for a quadruped it means keeping the trunk/base level so the robot does not tip or collapse.
 
-**Files modified:**
-- `source/rob6323_go2/rob6323_go2/tasks/direct/rob6323_go2/rob6323_go2_env.py`
-- `source/rob6323_go2/rob6323_go2/tasks/direct/rob6323_go2/rob6323_go2_env_cfg.py`
 
 ### Key change
 1. **Base-level reward (new):**
@@ -324,10 +318,20 @@ scp <username>@<remote_host>:/path/to/project/logs/<JOB_ID>/.../videos/play/rl-v
 
 
 
-## bonus_v1: Actuator Friction Model (Sim-to-Real)
+## bonus_v1: Actuator Friction Model
 * **Goal**: Implement a realistic actuator friction/viscous model to narrow the sim-to-real gap for potential real-robot deployment (+5 pts bonus).
 * **Changes**:
     * **Initialization**: Added `mu_v` (viscous coefficient) and `f_s` (stiction coefficient) tensors to the environment.
     * **Randomization**: Implemented per-episode randomization in `_reset_idx` with ranges $\mu_v \sim \mathcal{U}(0.0, 0.3)$ and $F_s \sim \mathcal{U}(0.0, 2.5)$.
     * **Physics Implementation**: Updated `_apply_action` to calculate $\tau_{friction} = F_s \cdot \tanh(\dot{q} / 0.1) + \mu_v \cdot \dot{q}$ and subtract it from the PD torque output before sending it to the simulation.
 * **Impact**: Forces the policy to become robust to internal joint resistance, significantly narrowing the gap between simulation and real-world behavior.
+
+---
+
+### bonus_part2_v1: Rough Terrain Locomotion
+* Goal: Train a robust "blind" locomotion gait capable of navigating uneven surfaces without height sensors.
+* Implementation: 
+    * Transitioned from a flat plane to a procedurally generated heightfield using HfRandomUniformTerrainCfg.
+    * Terrain consists of 100% random uniform noise with 1–5cm bumps to test proprioceptive robustness.
+    * Implemented terrain-relative spawning (env_origins) to ensure stable initialization on the bumpy surface.
+* Result: Job 135309 successfully completed over 1 hour of training on procedural terrain, demonstrating a stable, high-clearance trot (0.38m target height) that is robust to geometric noise.
