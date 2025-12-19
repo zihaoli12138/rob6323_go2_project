@@ -42,7 +42,7 @@ class Rob6323Go2Env(DirectRLEnv):
         # commands: [vx, vy, yaw_rate]
         self._commands = torch.zeros(self.num_envs, 3, device=self.device)
 
-        # logging
+        # logging - Including TA required metrics
         self._episode_sums = {
             key: torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
             for key in [
@@ -56,6 +56,8 @@ class Rob6323Go2Env(DirectRLEnv):
                 "ang_vel_xy_l2",
                 "torque_l2",
                 "dof_vel_l2",
+                "feet_clearance",
+                "contacts_shaped_force"
             ]
         }
 
@@ -70,8 +72,8 @@ class Rob6323Go2Env(DirectRLEnv):
             requires_grad=False,
         )
 
-        self.Kp = torch.tensor([cfg.Kp] * self.cfg.action_space, device=self.device).unsqueeze(0).repeat(self.num_envs, 1)
-        self.Kd = torch.tensor([cfg.Kd] * self.cfg.action_space, device=self.device).unsqueeze(0).repeat(self.num_envs, 1)
+        self.Kp = torch.full((self.num_envs, action_dim), cfg.Kp, device=self.device)
+        self.Kd = torch.full((self.num_envs, action_dim), cfg.Kd, device=self.device)
         self.torque_limits = cfg.torque_limits
 
         self._feet_ids = []
@@ -119,6 +121,9 @@ class Rob6323Go2Env(DirectRLEnv):
         self.desired_joint_pos = self.cfg.action_scale * self._actions + self.robot.data.default_joint_pos
 
     def _apply_action(self) -> None:
+        # Update Raycaster (Mandatory for uneven terrain)
+        self._height_scanner.update(self.step_dt)
+
         # Calculate PD torques
         torques = self.Kp * (self.desired_joint_pos - self.robot.data.joint_pos) - self.Kd * self.robot.data.joint_vel
         
@@ -132,25 +137,20 @@ class Rob6323Go2Env(DirectRLEnv):
         self.robot.set_joint_effort_target(torques)
 
     def _get_observations(self) -> dict:
-        # --- Process Height Scan ---
-        # Subtract current base height to get relative terrain data
+        # Relative height scan (187 points)
         height_scan = self._height_scanner.data.pos_w[:, :, 2] - self.robot.data.root_pos_w[:, 2].unsqueeze(1)
         
         obs = torch.cat(
             [
-                t
-                for t in (
-                    self.robot.data.root_lin_vel_b,
-                    self.robot.data.root_ang_vel_b,
-                    self.robot.data.projected_gravity_b,
-                    self._commands,
-                    self.robot.data.joint_pos - self.robot.data.default_joint_pos,
-                    self.robot.data.joint_vel,
-                    self._actions,
-                    self.clock_inputs,
-                    height_scan, # Added height perception
-                )
-                if t is not None
+                self.robot.data.root_lin_vel_b,
+                self.robot.data.root_ang_vel_b,
+                self.robot.data.projected_gravity_b,
+                self._commands,
+                self.robot.data.joint_pos - self.robot.data.default_joint_pos,
+                self.robot.data.joint_vel,
+                self._actions,
+                self.clock_inputs,
+                height_scan, 
             ],
             dim=-1,
         )
@@ -177,11 +177,26 @@ class Rob6323Go2Env(DirectRLEnv):
         self._step_contact_targets()
         rew_raibert_heuristic = self._reward_raibert_heuristic()
 
+        # --- TA Required Rewards ---
+        # Foot Clearance
+        phases = 1 - torch.abs(1.0 - torch.clip((self.foot_indices * 2.0) - 1.0, 0.0, 1.0) * 2.0)
+        foot_height = self.foot_positions_w[:, :, 2]
+        target_height = 0.08 * phases + 0.02
+        rew_foot_clearance = torch.square(target_height - foot_height) * (1 - self.desired_contact_states)
+        rew_feet_clearance = torch.sum(rew_foot_clearance, dim=1)
+
+        # Tracking Contacts Shaped Force
+        foot_forces = torch.norm(self._contact_sensor.data.net_forces_w_history[:, 0, self._feet_ids], dim=-1)
+        rew_tracking_contacts_shaped_force = 0.
+        for i in range(4):
+            rew_tracking_contacts_shaped_force += - (1 - self.desired_contact_states[:, i]) * (
+                        1 - torch.exp(-1 * foot_forces[:, i] ** 2 / 100.))
+        rew_tracking_contacts_shaped_force = rew_tracking_contacts_shaped_force / 4
+
         # 4. Level/Height
         gravity_xy_sq = torch.sum(self.robot.data.projected_gravity_b[:, :2] ** 2, dim=1)
         base_level_mapped = torch.exp(-gravity_xy_sq / self.cfg.base_level_exp_denom)
 
-        # Relative height check for terrain
         base_height = self.robot.data.root_pos_w[:, 2]
         height_err_sq = (base_height - self.cfg.base_height_target) ** 2
         height_mapped = torch.exp(-height_err_sq / self.cfg.base_height_exp_denom)
@@ -197,6 +212,8 @@ class Rob6323Go2Env(DirectRLEnv):
             "track_ang_vel_z_exp": yaw_rate_error_mapped * self.cfg.yaw_rate_reward_scale * self.step_dt,
             "rew_action_rate": rew_action_rate * self.cfg.action_rate_reward_scale * self.step_dt,
             "raibert_heuristic": rew_raibert_heuristic * self.cfg.raibert_heuristic_reward_scale * self.step_dt,
+            "feet_clearance": rew_feet_clearance * self.cfg.feet_clearance_reward_scale * self.step_dt,
+            "contacts_shaped_force": rew_tracking_contacts_shaped_force * self.cfg.tracking_contacts_shaped_force_reward_scale * self.step_dt,
             "base_level_exp": base_level_mapped * self.cfg.base_level_reward_scale * self.step_dt,
             "base_height_exp": height_mapped * self.cfg.base_height_reward_scale * self.step_dt,
             "lin_vel_z_l2": lin_vel_z_l2 * self.cfg.lin_vel_z_reward_scale * self.step_dt,
@@ -244,12 +261,10 @@ class Rob6323Go2Env(DirectRLEnv):
         self._previous_actions[env_ids] = 0.0
         self._torques[env_ids] = 0.0
 
-        # Commands
         self._commands[env_ids, 0] = torch.empty(len(env_ids), device=self.device).uniform_(*self.cfg.command_lin_vel_x_range)
         self._commands[env_ids, 1] = torch.empty(len(env_ids), device=self.device).uniform_(*self.cfg.command_lin_vel_y_range)
         self._commands[env_ids, 2] = torch.empty(len(env_ids), device=self.device).uniform_(*self.cfg.command_yaw_rate_range)
 
-        # Bonus 2: Respawn on terrain origins
         joint_pos = self.robot.data.default_joint_pos[env_ids]
         joint_vel = self.robot.data.default_joint_vel[env_ids]
         default_root_state = self.robot.data.default_root_state[env_ids]
