@@ -272,7 +272,6 @@ v5 did not work
 ## v8: High-Speed Stability
 * **Goal**: Fix leg synchronization "lag" during high-speed forward motion ($v_x = 1.0 \, \text{m/s}$).
 * **Changes**:
-    * Increased **gait frequency** from **3.0Hz** to **4.0Hz**, allowing for faster, more responsive steps.
     * Adjusted `action_rate_reward_scale` to **-0.05** to provide the RL agent more freedom for the aggressive leg swings required at higher velocities.
 
 ## v9: Rubric Alignment & Smoothing
