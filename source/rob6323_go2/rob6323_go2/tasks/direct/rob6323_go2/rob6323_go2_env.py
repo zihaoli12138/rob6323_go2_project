@@ -35,8 +35,7 @@ class Rob6323Go2Env(DirectRLEnv):
         # store applied torques for torque regularization (anti-hop)
         self._torques = torch.zeros_like(self._actions)
 
-        # --- BONUS TASK: Friction Model Initialization ---
-        # Initialize tensors for randomized friction coefficients
+        # --- BONUS TASK 1: Friction Model Initialization ---
         self.mu_v = torch.zeros(self.num_envs, action_dim, device=self.device)
         self.f_s = torch.zeros(self.num_envs, action_dim, device=self.device)
 
@@ -116,11 +115,10 @@ class Rob6323Go2Env(DirectRLEnv):
         self.desired_joint_pos = self.cfg.action_scale * self._actions + self.robot.data.default_joint_pos
 
     def _apply_action(self) -> None:
-        # Calculate PD torques
+        # PD torques
         torques = self.Kp * (self.desired_joint_pos - self.robot.data.joint_pos) - self.Kd * self.robot.data.joint_vel
         
-        # --- BONUS TASK: Actuator Friction Model ---
-        # Subtract friction: tau_friction = Fs * tanh(q_dot / 0.1) + mu_v * q_dot
+        # --- BONUS TASK 1: Friction Model ---
         tau_stiction = self.f_s * torch.tanh(self.robot.data.joint_vel / 0.1)
         tau_viscous = self.mu_v * self.robot.data.joint_vel
         torques = torques - (tau_stiction + tau_viscous)
@@ -130,6 +128,7 @@ class Rob6323Go2Env(DirectRLEnv):
         self.robot.set_joint_effort_target(torques)
 
     def _get_observations(self) -> dict:
+        # Note: If you implement a height scanner for Bonus 2, add it to this cat
         obs = torch.cat(
             [
                 t
@@ -150,14 +149,14 @@ class Rob6323Go2Env(DirectRLEnv):
         return {"policy": obs}
 
     def _get_rewards(self) -> torch.Tensor:
-        # tracking
+        # 1. Tracking
         lin_vel_error = torch.sum((self._commands[:, :2] - self.robot.data.root_lin_vel_b[:, :2]) ** 2, dim=1)
         lin_vel_error_mapped = torch.exp(-lin_vel_error / 0.25)
 
         yaw_rate_error = (self._commands[:, 2] - self.robot.data.root_ang_vel_b[:, 2]) ** 2
         yaw_rate_error_mapped = torch.exp(-yaw_rate_error / 0.25)
 
-        # action smoothness
+        # 2. Smoothness
         rew_action_rate = torch.sum((self._actions - self.last_actions[:, :, 0]) ** 2, dim=1) * (self.cfg.action_scale**2)
         rew_action_rate += torch.sum(
             (self._actions - 2.0 * self.last_actions[:, :, 0] + self.last_actions[:, :, 1]) ** 2, dim=1
@@ -166,19 +165,20 @@ class Rob6323Go2Env(DirectRLEnv):
         self.last_actions = torch.roll(self.last_actions, shifts=1, dims=2)
         self.last_actions[:, :, 0] = self._actions
 
-        # gait + Raibert
+        # 3. Gait + Raibert
         self._step_contact_targets()
         rew_raibert_heuristic = self._reward_raibert_heuristic()
 
-        # base levels
+        # 4. Height/Level (Adapted for Rough Terrain)
         gravity_xy_sq = torch.sum(self.robot.data.projected_gravity_b[:, :2] ** 2, dim=1)
         base_level_mapped = torch.exp(-gravity_xy_sq / self.cfg.base_level_exp_denom)
 
+        # Use root_pos_w relative to terrain height if possible, otherwise raw world Z
         base_height = self.robot.data.root_pos_w[:, 2]
         height_err_sq = (base_height - self.cfg.base_height_target) ** 2
         height_mapped = torch.exp(-height_err_sq / self.cfg.base_height_exp_denom)
 
-        # anti-hop
+        # 5. Regularizers
         lin_vel_z_l2 = self.robot.data.root_lin_vel_b[:, 2] ** 2
         ang_vel_xy_l2 = torch.sum(self.robot.data.root_ang_vel_b[:, :2] ** 2, dim=1)
         torque_l2 = torch.sum(self._torques ** 2, dim=1)
@@ -205,15 +205,14 @@ class Rob6323Go2Env(DirectRLEnv):
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         time_out = self.episode_length_buf >= self.max_episode_length - 1
-
         net_contact_forces = self._contact_sensor.data.net_forces_w_history
         base_hit = torch.any(
             torch.max(torch.norm(net_contact_forces[:, :, self._base_id], dim=-1), dim=1)[0] > 1.0,
             dim=1,
         )
-
         upside_down = self.robot.data.projected_gravity_b[:, 2] > 0.0
-
+        
+        # Min height check
         base_height = self.robot.data.root_pos_w[:, 2]
         too_low = base_height < self.cfg.base_height_min
 
@@ -224,11 +223,14 @@ class Rob6323Go2Env(DirectRLEnv):
         if env_ids is None or len(env_ids) == self.num_envs:
             env_ids = self.robot._ALL_INDICES
 
+        # Bonus 2: Curriculum-based terrain reset
+        if self.cfg.terrain.terrain_type == "generator":
+            self._terrain.update_step(env_ids)
+
         self.robot.reset(env_ids)
         super()._reset_idx(env_ids)
 
-        # --- BONUS TASK: Friction Randomization ---
-        # mu_v ~ U(0.0, 0.3), Fs ~ U(0.0, 2.5)
+        # Bonus 1: Friction Randomization
         self.mu_v[env_ids] = torch.rand(len(env_ids), self.mu_v.shape[1], device=self.device) * 0.3
         self.f_s[env_ids] = torch.rand(len(env_ids), self.f_s.shape[1], device=self.device) * 2.5
 
@@ -239,10 +241,12 @@ class Rob6323Go2Env(DirectRLEnv):
         self._previous_actions[env_ids] = 0.0
         self._torques[env_ids] = 0.0
 
+        # Command ranges
         self._commands[env_ids, 0] = torch.empty(len(env_ids), device=self.device).uniform_(*self.cfg.command_lin_vel_x_range)
         self._commands[env_ids, 1] = torch.empty(len(env_ids), device=self.device).uniform_(*self.cfg.command_lin_vel_y_range)
         self._commands[env_ids, 2] = torch.empty(len(env_ids), device=self.device).uniform_(*self.cfg.command_yaw_rate_range)
 
+        # Bonus 2: Respawn on terrain origins
         joint_pos = self.robot.data.default_joint_pos[env_ids]
         joint_vel = self.robot.data.default_joint_vel[env_ids]
         default_root_state = self.robot.data.default_root_state[env_ids]
@@ -263,6 +267,7 @@ class Rob6323Go2Env(DirectRLEnv):
         self.clock_inputs[env_ids] = 0.0
         self.desired_contact_states[env_ids] = 0.0
 
+    # --- Debug Viz ---
     def _set_debug_vis_impl(self, debug_vis: bool):
         if debug_vis:
             if not hasattr(self, "goal_vel_visualizer"):

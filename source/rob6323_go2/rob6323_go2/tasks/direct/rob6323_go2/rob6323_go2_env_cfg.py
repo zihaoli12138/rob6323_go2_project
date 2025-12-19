@@ -6,6 +6,7 @@
 from isaaclab_assets.robots.unitree import UNITREE_GO2_CFG
 
 import isaaclab.sim as sim_utils
+import isaaclab.terrains as terrain_gen
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg
 from isaaclab.envs import DirectRLEnvCfg
@@ -14,9 +15,33 @@ from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, GREEN_ARROW_X_MARKE
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import ContactSensorCfg
 from isaaclab.sim import SimulationCfg
-from isaaclab.terrains import TerrainImporterCfg
+from isaaclab.terrains import TerrainImporterCfg, TerrainGeneratorCfg
 from isaaclab.utils import configclass
 
+@configclass
+class Rob6323Go2RoughTerrainCfg(TerrainGeneratorCfg):
+    """Configuration for procedurally generated uneven terrain."""
+    size = (8.0, 8.0)
+    border_width = 20.0
+    num_rows = 10
+    num_cols = 20
+    horizontal_scale = 0.1
+    vertical_scale = 0.005
+    slope_threshold = 0.75
+    use_cache = False
+    curriculum = True  # Enable curriculum to start on flat rows first
+    
+    sub_terrains = {
+        "pyramid_stairs": terrain_gen.HfPyramidStairsTerrainCfg(
+            proportion=0.4, step_width=0.31, step_height_range=(0.05, 0.15)
+        ),
+        "random_uniform": terrain_gen.HfRandomUniformTerrainCfg(
+            proportion=0.4, noise_range=(0.02, 0.08), noise_step=0.02, downsampled_scale=0.2
+        ),
+        "sloped": terrain_gen.HfPyramidSlopedTerrainCfg(
+            proportion=0.2, slope_range=(0.0, 0.3)
+        ),
+    }
 
 @configclass
 class Rob6323Go2EnvCfg(DirectRLEnvCfg):
@@ -27,42 +52,35 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     # spaces
     action_scale = 0.25
     action_space = 12
-    observation_space = 48 + 4  # baseline adds 4 clock inputs
+    observation_space = 48 + 4  # (If adding height scan later, increase this number)
     state_space = 0
     debug_vis = True
 
     # ---------------------------
-    # Rewards (baseline + yours)
+    # Rewards
     # ---------------------------
     lin_vel_reward_scale = 1.0
     yaw_rate_reward_scale = 0.5
-
-    # baseline: action smoothness (note: negative)
     action_rate_reward_scale = -0.0001
-
-    # baseline: Raibert heuristic (note: negative; set to 0.0 to disable)
     raibert_heuristic_reward_scale = -20.0
-
-    # your shaping (set to 0.0 to disable)
     base_level_reward_scale = 0.10
     base_height_reward_scale = 0.60
 
-    # exp mapping denominators (bigger => gentler)
+    # exp mapping denominators
     base_level_exp_denom = 0.25
     base_height_exp_denom = 0.02
 
-    # base height target for shaping reward (world z)
-    base_height_target = 0.35
+    # base height target (slightly higher for rough terrain clearance)
+    base_height_target = 0.38
+    base_height_min = 0.20  
 
-    # termination threshold
-    base_height_min = 0.22  # terminate if base < 20 cm
     # Anti-hop regularizers
-    lin_vel_z_reward_scale = -2.0      # (v_z)^2
-    ang_vel_xy_reward_scale = -0.05    # (ωx^2 + ωy^2)
-    torque_reward_scale = -2.0e-5      # sum(τ^2)  (VERY small)
-    dof_vel_reward_scale = -1.0e-4     # sum(qd^2) (small)
+    lin_vel_z_reward_scale = -2.0
+    ang_vel_xy_reward_scale = -0.05
+    torque_reward_scale = -2.0e-5
+    dof_vel_reward_scale = -1.0e-4
 
-    # your v1 controlled command sampling
+    # command sampling
     command_lin_vel_x_range = (-1.0, 1.0)
     command_lin_vel_y_range = (-0.05, 0.05)
     command_yaw_rate_range  = (-1.0, 1.0)
@@ -82,9 +100,11 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
         ),
     )
 
+    # --- UPDATED FOR BONUS V2: ROUGH TERRAIN ---
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",
-        terrain_type="plane",
+        terrain_type="generator", # Switch from 'plane' to 'generator'
+        terrain_generator=Rob6323Go2RoughTerrainCfg(),
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
@@ -97,7 +117,7 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     )
 
     # ---------------------------
-    # Robot: disable implicit PD; we do torque-level PD
+    # Robot
     # ---------------------------
     Kp = 20.0
     Kd = 0.5
@@ -108,8 +128,8 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
         joint_names_expr=[".*_hip_joint", ".*_thigh_joint", ".*_calf_joint"],
         effort_limit=23.5,
         velocity_limit=30.0,
-        stiffness=0.0,  # disable implicit P-gain
-        damping=0.0,    # disable implicit D-gain
+        stiffness=0.0,
+        damping=0.0,
     )
 
     # ---------------------------
