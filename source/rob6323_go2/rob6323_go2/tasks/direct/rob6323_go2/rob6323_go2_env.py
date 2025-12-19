@@ -26,11 +26,14 @@ class Rob6323Go2Env(DirectRLEnv):
     def __init__(self, cfg: Rob6323Go2EnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
 
+        action_dim = gym.spaces.flatdim(self.single_action_space)
+
         # actions
-        self._actions = torch.zeros(self.num_envs, gym.spaces.flatdim(self.single_action_space), device=self.device)
+        self._actions = torch.zeros(self.num_envs, action_dim, device=self.device)
         self._previous_actions = torch.zeros_like(self._actions)
 
         # store applied torques for torque regularization (anti-hop)
+        # (same shape as actions / dofs)
         self._torques = torch.zeros_like(self._actions)
 
         # commands: [vx, vy, yaw_rate]
@@ -60,7 +63,7 @@ class Rob6323Go2Env(DirectRLEnv):
         # baseline: action history (num_envs, action_dim, history=3)
         self.last_actions = torch.zeros(
             self.num_envs,
-            gym.spaces.flatdim(self.single_action_space),
+            action_dim,
             3,
             dtype=torch.float,
             device=self.device,
@@ -103,7 +106,11 @@ class Rob6323Go2Env(DirectRLEnv):
         if self.device == "cpu":
             self.scene.filter_collisions(global_prim_paths=[])
 
+        # Register assets in the scene (robust Isaac Lab pattern)
         self.scene.articulations["robot"] = self.robot
+        # (optional but safe) register sensor so it updates with scene
+        if hasattr(self.scene, "sensors"):
+            self.scene.sensors["contact_sensor"] = self._contact_sensor
 
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
@@ -143,14 +150,14 @@ class Rob6323Go2Env(DirectRLEnv):
         return {"policy": obs}
 
     def _get_rewards(self) -> torch.Tensor:
-        # tracking
+        # ---------------- tracking ----------------
         lin_vel_error = torch.sum((self._commands[:, :2] - self.robot.data.root_lin_vel_b[:, :2]) ** 2, dim=1)
         lin_vel_error_mapped = torch.exp(-lin_vel_error / 0.25)
 
         yaw_rate_error = (self._commands[:, 2] - self.robot.data.root_ang_vel_b[:, 2]) ** 2
         yaw_rate_error_mapped = torch.exp(-yaw_rate_error / 0.25)
 
-        # baseline: action smoothness (1st + 2nd derivative)
+        # ---------------- baseline: action smoothness (1st + 2nd derivative) ----------------
         rew_action_rate = torch.sum((self._actions - self.last_actions[:, :, 0]) ** 2, dim=1) * (self.cfg.action_scale**2)
         rew_action_rate += torch.sum(
             (self._actions - 2.0 * self.last_actions[:, :, 0] + self.last_actions[:, :, 1]) ** 2, dim=1
@@ -159,11 +166,11 @@ class Rob6323Go2Env(DirectRLEnv):
         self.last_actions = torch.roll(self.last_actions, shifts=1, dims=2)
         self.last_actions[:, :, 0] = self._actions
 
-        # baseline: gait + Raibert
+        # ---------------- baseline: gait + Raibert ----------------
         self._step_contact_targets()
         rew_raibert_heuristic = self._reward_raibert_heuristic()
 
-        # your shaping: base level + base height (exp)
+        # ---------------- your shaping: base level + base height (exp) ----------------
         gravity_xy_sq = torch.sum(self.robot.data.projected_gravity_b[:, :2] ** 2, dim=1)
         base_level_mapped = torch.exp(-gravity_xy_sq / self.cfg.base_level_exp_denom)
 
@@ -202,7 +209,10 @@ class Rob6323Go2Env(DirectRLEnv):
         time_out = self.episode_length_buf >= self.max_episode_length - 1
 
         net_contact_forces = self._contact_sensor.data.net_forces_w_history
-        base_hit = torch.any(torch.max(torch.norm(net_contact_forces[:, :, self._base_id], dim=-1), dim=1)[0] > 1.0, dim=1)
+        base_hit = torch.any(
+            torch.max(torch.norm(net_contact_forces[:, :, self._base_id], dim=-1), dim=1)[0] > 1.0,
+            dim=1,
+        )
 
         upside_down = self.robot.data.projected_gravity_b[:, 2] > 0.0
 
@@ -226,7 +236,7 @@ class Rob6323Go2Env(DirectRLEnv):
         self._previous_actions[env_ids] = 0.0
         self._torques[env_ids] = 0.0
 
-        # your v1 command ranges
+        # command ranges
         self._commands[env_ids, 0] = torch.empty(len(env_ids), device=self.device).uniform_(*self.cfg.command_lin_vel_x_range)
         self._commands[env_ids, 1] = torch.empty(len(env_ids), device=self.device).uniform_(*self.cfg.command_lin_vel_y_range)
         self._commands[env_ids, 2] = torch.empty(len(env_ids), device=self.device).uniform_(*self.cfg.command_yaw_rate_range)

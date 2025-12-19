@@ -44,19 +44,18 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     raibert_heuristic_reward_scale = -10.0
 
     # your shaping (set to 0.0 to disable)
-    base_level_reward_scale = 0.0
-    base_height_reward_scale = 0.0
+    base_level_reward_scale = 0.10
+    base_height_reward_scale = 0.60
 
     # exp mapping denominators (bigger => gentler)
     base_level_exp_denom = 0.25
-    base_height_exp_denom = 0.05
+    base_height_exp_denom = 0.02
 
     # base height target for shaping reward (world z)
-    base_height_target = 0.32
+    base_height_target = 0.35
 
     # termination threshold
-    base_height_min = 0.20  # terminate if base < 20 cm
-
+    base_height_min = 0.22  # terminate if base < 20 cm
     # Anti-hop regularizers
     lin_vel_z_reward_scale = -2.0      # (v_z)^2
     ang_vel_xy_reward_scale = -0.05    # (ωx^2 + ωy^2)
