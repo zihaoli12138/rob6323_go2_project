@@ -1,75 +1,94 @@
 # Copyright (c) 2022-2025, The Isaac Lab Project Developers
 # All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
 
 from isaaclab_assets.robots.unitree import UNITREE_GO2_CFG
+
 import isaaclab.sim as sim_utils
-import isaaclab.envs.mdp as mdp
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg
 from isaaclab.envs import DirectRLEnvCfg
-from isaaclab.managers import EventTermCfg as EventTerm
-from isaaclab.managers import SceneEntityCfg
 from isaaclab.markers import VisualizationMarkersCfg
 from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, GREEN_ARROW_X_MARKER_CFG
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import ContactSensorCfg
 from isaaclab.sim import SimulationCfg
 from isaaclab.terrains import TerrainImporterCfg
-from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG
 from isaaclab.utils import configclass
 
-@configclass
-class EventCfg:
-    """Configuration for randomization."""
-    physics_material = EventTerm(
-        func=mdp.randomize_rigid_body_material,
-        mode="startup",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
-            "static_friction_range": (0.8, 1.2),
-            "dynamic_friction_range": (0.6, 1.0),
-            "restitution_range": (0.0, 0.0),
-            "num_buckets": 64,
-        },
-    )
-    add_base_mass = EventTerm(
-        func=mdp.randomize_rigid_body_mass,
-        mode="startup",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="base"),
-            "mass_distribution_params": (-1.0, 3.0),
-            "operation": "add",
-        },
-    )
 
 @configclass
 class Rob6323Go2EnvCfg(DirectRLEnvCfg):
+    # env
     decimation = 4
     episode_length_s = 20.0
+
+    # spaces
     action_scale = 0.25
     action_space = 12
-    # Base (48) + Clock (4) = 52
-    observation_space = 52 
+    observation_space = 48 + 4  # baseline adds 4 clock inputs
+    state_space = 0
     debug_vis = True
 
-    # --- TA Specified Reward Scales ---
-    feet_clearance_reward_scale = -200.0  
-    tracking_contacts_shaped_force_reward_scale = 1.0  
-    
-    # --- Baseline Rewards (v10) ---
+    # ---------------------------
+    # Rewards (baseline + yours)
+    # ---------------------------
     lin_vel_reward_scale = 1.0
     yaw_rate_reward_scale = 0.5
+
+    # baseline: action smoothness (note: negative)
     action_rate_reward_scale = -0.0001
+
+    # baseline: Raibert heuristic (note: negative; set to 0.0 to disable)
     raibert_heuristic_reward_scale = -20.0
+
+    # your shaping (set to 0.0 to disable)
     base_level_reward_scale = 0.10
     base_height_reward_scale = 0.60
-    flat_orientation_reward_scale = 0.0 # Critical for uneven terrain
-    
-    lin_vel_z_reward_scale = -2.0
-    ang_vel_xy_reward_scale = -0.05
-    torque_reward_scale = -2.0e-5
-    dof_vel_reward_scale = -1.0e-4
 
+    # exp mapping denominators (bigger => gentler)
+    base_level_exp_denom = 0.25
+    base_height_exp_denom = 0.02
+
+    # base height target for shaping reward (world z)
+    base_height_target = 0.35
+
+    # termination threshold
+    base_height_min = 0.22
+
+    # ---------------------------
+    # Anti-hop regularizers (costs)
+    # ---------------------------
+    lin_vel_z_reward_scale = -2.0       # (v_z)^2
+    ang_vel_xy_reward_scale = -0.05     # (ωx^2 + ωy^2)
+    torque_reward_scale = -2.0e-5       # sum(τ^2)
+    dof_vel_reward_scale = -1.0e-4      # sum(qd^2)
+
+    # ---------------------------
+    # TA-suggested gait/contact shaping
+    # ---------------------------
+    # Feet clearance: penalize (target_height - foot_height)^2 during swing
+    # Use negative scale because it's a cost (same pattern as your other regularizers)
+    feet_clearance_reward_scale = -2.0
+
+    # Swing contact penalty: penalize nonzero contact force when desired_contact==0
+    # The formula itself is negative; keep this positive to increase penalty magnitude.
+    tracking_contacts_shaped_force_reward_scale = 1.0
+    tracking_contacts_force_denom = 100.0  # matches TA snippet
+
+    # clearance profile parameters (TA snippet uses 0.08 * phases + 0.02)
+    foot_clearance_height = 0.08
+    foot_clearance_offset = 0.02
+
+    # your v1 controlled command sampling
+    command_lin_vel_x_range = (-1.0, 1.0)
+    command_lin_vel_y_range = (-0.05, 0.05)
+    command_yaw_rate_range = (-1.0, 1.0)
+
+    # ---------------------------
+    # Simulation
+    # ---------------------------
     sim: SimulationCfg = SimulationCfg(
         dt=1 / 200,
         render_interval=decimation,
@@ -78,36 +97,45 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
             restitution_combine_mode="multiply",
             static_friction=1.0,
             dynamic_friction=1.0,
+            restitution=0.0,
         ),
     )
 
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",
-        terrain_type="generator",
-        terrain_generator=ROUGH_TERRAINS_CFG,
-        max_init_terrain_level=5,
+        terrain_type="plane",
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
             restitution_combine_mode="multiply",
             static_friction=1.0,
             dynamic_friction=1.0,
+            restitution=0.0,
         ),
+        debug_vis=False,
     )
 
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=4.0, replicate_physics=True)
-    events: EventCfg = EventCfg()
+    # ---------------------------
+    # Robot: disable implicit PD; we do torque-level PD
+    # ---------------------------
+    Kp = 20.0
+    Kd = 0.5
+    torque_limits = 100.0
 
     robot_cfg: ArticulationCfg = UNITREE_GO2_CFG.replace(prim_path="/World/envs/env_.*/Robot")
     robot_cfg.actuators["base_legs"] = ImplicitActuatorCfg(
         joint_names_expr=[".*_hip_joint", ".*_thigh_joint", ".*_calf_joint"],
         effort_limit=23.5,
         velocity_limit=30.0,
-        stiffness=0.0, 
+        stiffness=0.0,
         damping=0.0,
     )
 
-    Kp, Kd, torque_limits = 20.0, 0.5, 100.0
+    # ---------------------------
+    # Scene / sensors / debug markers
+    # ---------------------------
+    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=4.0, replicate_physics=True)
+
     contact_sensor: ContactSensorCfg = ContactSensorCfg(
         prim_path="/World/envs/env_.*/Robot/.*",
         history_length=3,
@@ -115,10 +143,12 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
         track_air_time=True,
     )
 
-    goal_vel_visualizer_cfg: VisualizationMarkersCfg = GREEN_ARROW_X_MARKER_CFG.replace(prim_path="/Visuals/Command/velocity_goal")
-    current_vel_visualizer_cfg: VisualizationMarkersCfg = BLUE_ARROW_X_MARKER_CFG.replace(prim_path="/Visuals/Command/velocity_current")
-    
-    command_lin_vel_x_range = (-1.0, 1.0)
-    command_lin_vel_y_range = (-0.05, 0.05)
-    command_yaw_rate_range  = (-1.0, 1.0)
-    base_height_target, base_height_min = 0.38, 0.20
+    goal_vel_visualizer_cfg: VisualizationMarkersCfg = GREEN_ARROW_X_MARKER_CFG.replace(
+        prim_path="/Visuals/Command/velocity_goal"
+    )
+    current_vel_visualizer_cfg: VisualizationMarkersCfg = BLUE_ARROW_X_MARKER_CFG.replace(
+        prim_path="/Visuals/Command/velocity_current"
+    )
+
+    goal_vel_visualizer_cfg.markers["arrow"].scale = (0.5, 0.5, 0.5)
+    current_vel_visualizer_cfg.markers["arrow"].scale = (0.5, 0.5, 0.5)
