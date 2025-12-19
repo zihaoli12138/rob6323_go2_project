@@ -13,7 +13,7 @@ from collections.abc import Sequence
 import isaaclab.sim as sim_utils
 from isaaclab.assets import Articulation
 from isaaclab.envs import DirectRLEnv
-from isaaclab.sensors import ContactSensor
+from isaaclab.sensors import ContactSensor, RayCaster
 from isaaclab.markers import VisualizationMarkers
 import isaaclab.utils.math as math_utils
 
@@ -32,7 +32,7 @@ class Rob6323Go2Env(DirectRLEnv):
         self._actions = torch.zeros(self.num_envs, action_dim, device=self.device)
         self._previous_actions = torch.zeros_like(self._actions)
 
-        # store applied torques for torque regularization (anti-hop)
+        # store applied torques
         self._torques = torch.zeros_like(self._actions)
 
         # --- BONUS TASK 1: Friction Model Initialization ---
@@ -93,6 +93,9 @@ class Rob6323Go2Env(DirectRLEnv):
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot_cfg)
         self._contact_sensor = ContactSensor(self.cfg.contact_sensor)
+        
+        # --- BONUS TASK 2: Height Scanner Setup ---
+        self._height_scanner = RayCaster(self.cfg.height_scanner)
 
         self.cfg.terrain.num_envs = self.scene.cfg.num_envs
         self.cfg.terrain.env_spacing = self.scene.cfg.env_spacing
@@ -105,6 +108,7 @@ class Rob6323Go2Env(DirectRLEnv):
         self.scene.articulations["robot"] = self.robot
         if hasattr(self.scene, "sensors"):
             self.scene.sensors["contact_sensor"] = self._contact_sensor
+            self.scene.sensors["height_scanner"] = self._height_scanner
 
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
@@ -128,6 +132,10 @@ class Rob6323Go2Env(DirectRLEnv):
         self.robot.set_joint_effort_target(torques)
 
     def _get_observations(self) -> dict:
+        # --- Process Height Scan ---
+        # Subtract current base height to get relative terrain data
+        height_scan = self._height_scanner.data.pos_w[:, :, 2] - self.robot.data.root_pos_w[:, 2].unsqueeze(1)
+        
         obs = torch.cat(
             [
                 t
@@ -140,6 +148,7 @@ class Rob6323Go2Env(DirectRLEnv):
                     self.robot.data.joint_vel,
                     self._actions,
                     self.clock_inputs,
+                    height_scan, # Added height perception
                 )
                 if t is not None
             ],
@@ -168,10 +177,11 @@ class Rob6323Go2Env(DirectRLEnv):
         self._step_contact_targets()
         rew_raibert_heuristic = self._reward_raibert_heuristic()
 
-        # 4. Height/Level (Adapted for Rough Terrain)
+        # 4. Level/Height
         gravity_xy_sq = torch.sum(self.robot.data.projected_gravity_b[:, :2] ** 2, dim=1)
         base_level_mapped = torch.exp(-gravity_xy_sq / self.cfg.base_level_exp_denom)
 
+        # Relative height check for terrain
         base_height = self.robot.data.root_pos_w[:, 2]
         height_err_sq = (base_height - self.cfg.base_height_target) ** 2
         height_mapped = torch.exp(-height_err_sq / self.cfg.base_height_exp_denom)
@@ -260,6 +270,7 @@ class Rob6323Go2Env(DirectRLEnv):
         self.clock_inputs[env_ids] = 0.0
         self.desired_contact_states[env_ids] = 0.0
 
+    # --- Debug Viz ---
     def _set_debug_vis_impl(self, debug_vis: bool):
         if debug_vis:
             if not hasattr(self, "goal_vel_visualizer"):

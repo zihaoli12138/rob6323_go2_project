@@ -6,84 +6,76 @@
 from isaaclab_assets.robots.unitree import UNITREE_GO2_CFG
 
 import isaaclab.sim as sim_utils
-import isaaclab.terrains as terrain_gen
+import isaaclab.envs.mdp as mdp
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg
 from isaaclab.envs import DirectRLEnvCfg
+from isaaclab.managers import EventTermCfg as EventTerm
+from isaaclab.managers import SceneEntityCfg
 from isaaclab.markers import VisualizationMarkersCfg
 from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, GREEN_ARROW_X_MARKER_CFG
 from isaaclab.scene import InteractiveSceneCfg
-from isaaclab.sensors import ContactSensorCfg
+from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns
 from isaaclab.sim import SimulationCfg
 from isaaclab.terrains import TerrainImporterCfg, TerrainGeneratorCfg
+from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG
 from isaaclab.utils import configclass
 
 @configclass
-class Rob6323Go2RoughTerrainCfg(TerrainGeneratorCfg):
-    """Simplified configuration for noisy uneven terrain."""
-    size = (8.0, 8.0)
-    border_width = 20.0
-    num_rows = 10
-    num_cols = 20
-    horizontal_scale = 0.1
-    vertical_scale = 0.005
-    use_cache = False
-    curriculum = False  # Disable curriculum for stability without perception
-    
-    sub_terrains = {
-        "random_uniform": terrain_gen.HfRandomUniformTerrainCfg(
-            proportion=1.0, 
-            noise_range=(0.01, 0.05), # 1-5cm bumps to test proprioceptive robustness
-            noise_step=0.01, 
-            downsampled_scale=0.2
-        ),
-    }
+class EventCfg:
+    """Configuration for randomization during startup and resets."""
+
+    physics_material = EventTerm(
+        func=mdp.randomize_rigid_body_material,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
+            "static_friction_range": (0.8, 1.2),
+            "dynamic_friction_range": (0.6, 1.0),
+            "restitution_range": (0.0, 0.0),
+            "num_buckets": 64,
+        },
+    )
+
+    add_base_mass = EventTerm(
+        func=mdp.randomize_rigid_body_mass,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names="base"),
+            "mass_distribution_params": (-1.0, 3.0),
+            "operation": "add",
+        },
+    )
 
 @configclass
 class Rob6323Go2EnvCfg(DirectRLEnvCfg):
-    # env
+    # env parameters
     decimation = 4
     episode_length_s = 20.0
-
-    # spaces
     action_scale = 0.25
     action_space = 12
-    observation_space = 48 + 4 
+    # Base (48) + Clock (4) + Height Scanner (187) = 239
+    observation_space = 239 
     state_space = 0
     debug_vis = True
 
-    # ---------------------------
-    # Rewards
-    # ---------------------------
+    # --- Rewards (Isaac Lab Example Style) ---
     lin_vel_reward_scale = 1.0
     yaw_rate_reward_scale = 0.5
     action_rate_reward_scale = -0.0001
     raibert_heuristic_reward_scale = -20.0
     base_level_reward_scale = 0.10
     base_height_reward_scale = 0.60
-
-    # exp mapping denominators
-    base_level_exp_denom = 0.25
-    base_height_exp_denom = 0.02
-
-    # base height target
-    base_height_target = 0.38
-    base_height_min = 0.20  
-
-    # Anti-hop regularizers
+    # On rough terrain, we set flat orientation scale to 0 to allow tilting
+    flat_orientation_reward_scale = 0.0 
+    
+    # Regularizers
     lin_vel_z_reward_scale = -2.0
     ang_vel_xy_reward_scale = -0.05
     torque_reward_scale = -2.0e-5
     dof_vel_reward_scale = -1.0e-4
 
-    # command sampling
-    command_lin_vel_x_range = (-1.0, 1.0)
-    command_lin_vel_y_range = (-0.05, 0.05)
-    command_yaw_rate_range  = (-1.0, 1.0)
-
-    # ---------------------------
-    # Simulation
-    # ---------------------------
+    # Simulation settings
     sim: SimulationCfg = SimulationCfg(
         dt=1 / 200,
         render_interval=decimation,
@@ -92,46 +84,52 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
             restitution_combine_mode="multiply",
             static_friction=1.0,
             dynamic_friction=1.0,
-            restitution=0.0,
         ),
     )
 
-    # --- SIMPLIFIED ROUGH TERRAIN ---
+    # --- Terrain Configuration (Isaac Lab Rough Style) ---
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",
-        terrain_type="generator", 
-        terrain_generator=Rob6323Go2RoughTerrainCfg(),
+        terrain_type="generator",
+        terrain_generator=ROUGH_TERRAINS_CFG, # Standard rough terrain suite
+        max_init_terrain_level=5,
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
             restitution_combine_mode="multiply",
             static_friction=1.0,
             dynamic_friction=1.0,
-            restitution=0.0,
         ),
         debug_vis=False,
     )
 
-    # ---------------------------
-    # Robot
-    # ---------------------------
-    Kp = 20.0
-    Kd = 0.5
-    torque_limits = 100.0
+    # --- Perceptive Locomotion: Height Scanner ---
+    # Adds a grid of rays to perceive terrain geometry
+    height_scanner = RayCasterCfg(
+        prim_path="/World/envs/env_.*/Robot/base",
+        offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
+        ray_alignment="yaw",
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.6, 1.0]),
+        debug_vis=False,
+        mesh_prim_paths=["/World/ground"],
+    )
+
+    # Scene and Assets
+    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=4.0, replicate_physics=True)
+    events: EventCfg = EventCfg() # Integrated Event Manager
 
     robot_cfg: ArticulationCfg = UNITREE_GO2_CFG.replace(prim_path="/World/envs/env_.*/Robot")
     robot_cfg.actuators["base_legs"] = ImplicitActuatorCfg(
         joint_names_expr=[".*_hip_joint", ".*_thigh_joint", ".*_calf_joint"],
         effort_limit=23.5,
         velocity_limit=30.0,
-        stiffness=0.0,
+        stiffness=0.0, 
         damping=0.0,
     )
 
-    # ---------------------------
-    # Scene / sensors / debug markers
-    # ---------------------------
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=4.0, replicate_physics=True)
+    Kp = 20.0
+    Kd = 0.5
+    torque_limits = 100.0
 
     contact_sensor: ContactSensorCfg = ContactSensorCfg(
         prim_path="/World/envs/env_.*/Robot/.*",
@@ -140,12 +138,19 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
         track_air_time=True,
     )
 
+    # Debug Visualizers
     goal_vel_visualizer_cfg: VisualizationMarkersCfg = GREEN_ARROW_X_MARKER_CFG.replace(
         prim_path="/Visuals/Command/velocity_goal"
     )
     current_vel_visualizer_cfg: VisualizationMarkersCfg = BLUE_ARROW_X_MARKER_CFG.replace(
         prim_path="/Visuals/Command/velocity_current"
     )
-
     goal_vel_visualizer_cfg.markers["arrow"].scale = (0.5, 0.5, 0.5)
     current_vel_visualizer_cfg.markers["arrow"].scale = (0.5, 0.5, 0.5)
+
+    # Command ranges
+    command_lin_vel_x_range = (-1.0, 1.0)
+    command_lin_vel_y_range = (-0.05, 0.05)
+    command_yaw_rate_range  = (-1.0, 1.0)
+    base_height_target = 0.38
+    base_height_min = 0.20
