@@ -86,11 +86,22 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     contact_force_exp_denom = 100.0
 
     # ---------------------------
+    # BONUS (from your merged env.py):
+    # friction randomization ranges (so there are no “magic numbers” in env.py)
+    # ---------------------------
+    # viscous friction coefficient range: mu_v ~ U(0, mu_v_max)
+    mu_v_max = 0.3
+    # stiction magnitude range: f_s ~ U(0, f_s_max)
+    f_s_max = 2.5
+    # stiction transition velocity scale used in tanh(qd / v_scale)
+    stiction_vel_scale = 0.1
+
+    # ---------------------------
     # Command sampling
     # ---------------------------
     command_lin_vel_x_range = (-1.0, 1.0)
     command_lin_vel_y_range = (-0.05, 0.05)
-    command_yaw_rate_range  = (-1.0, 1.0)
+    command_yaw_rate_range = (-1.0, 1.0)
 
     # ---------------------------
     # Simulation

@@ -35,6 +35,13 @@ class Rob6323Go2Env(DirectRLEnv):
         # store applied torques for torque regularization (anti-hop)
         self._torques = torch.zeros_like(self._actions)
 
+        # ---------------------------
+        # BONUS (from your bonus code):
+        # friction model parameters (per-env, per-joint)
+        # ---------------------------
+        self.mu_v = torch.zeros(self.num_envs, action_dim, device=self.device)  # viscous coefficient
+        self.f_s = torch.zeros(self.num_envs, action_dim, device=self.device)   # stiction magnitude
+
         # commands: [vx, vy, yaw_rate]
         self._commands = torch.zeros(self.num_envs, 3, device=self.device)
 
@@ -132,7 +139,19 @@ class Rob6323Go2Env(DirectRLEnv):
         self.desired_joint_pos = self.cfg.action_scale * self._actions + self.robot.data.default_joint_pos
 
     def _apply_action(self) -> None:
+        # PD torques
         torques = self.Kp * (self.desired_joint_pos - self.robot.data.joint_pos) - self.Kd * self.robot.data.joint_vel
+
+        # ---------------------------
+        # BONUS (from your bonus code):
+        # friction model
+        # ---------------------------
+        # stiction: bounded with tanh, stronger near zero velocity
+        tau_stiction = self.f_s * torch.tanh(self.robot.data.joint_vel / 0.1)
+        # viscous: proportional to velocity
+        tau_viscous = self.mu_v * self.robot.data.joint_vel
+        torques = torques - (tau_stiction + tau_viscous)
+
         torques = torch.clip(torques, -self.torque_limits, self.torque_limits)
 
         # save torques for regularization
@@ -161,14 +180,14 @@ class Rob6323Go2Env(DirectRLEnv):
         return {"policy": obs}
 
     def _get_rewards(self) -> torch.Tensor:
-        # tracking 
+        # tracking
         lin_vel_error = torch.sum((self._commands[:, :2] - self.robot.data.root_lin_vel_b[:, :2]) ** 2, dim=1)
         lin_vel_error_mapped = torch.exp(-lin_vel_error / 0.25)
 
         yaw_rate_error = (self._commands[:, 2] - self.robot.data.root_ang_vel_b[:, 2]) ** 2
         yaw_rate_error_mapped = torch.exp(-yaw_rate_error / 0.25)
 
-        # baseline: action smoothness 
+        # baseline: action smoothness
         rew_action_rate = torch.sum((self._actions - self.last_actions[:, :, 0]) ** 2, dim=1) * (self.cfg.action_scale**2)
         rew_action_rate += torch.sum(
             (self._actions - 2.0 * self.last_actions[:, :, 0] + self.last_actions[:, :, 1]) ** 2, dim=1
@@ -195,11 +214,10 @@ class Rob6323Go2Env(DirectRLEnv):
         torque_l2 = torch.sum(self._torques ** 2, dim=1)
         dof_vel_l2 = torch.sum(self.robot.data.joint_vel ** 2, dim=1)
 
-        # TA rewards: feet clearance + swing-contact force 
-        # desired_contact_states is SMOOTHED in _step_contact_targets; use it as a soft mask
+        # TA rewards: feet clearance + swing-contact force
         swing_mask = 1.0 - self.desired_contact_states  # (N,4)
 
-        # 1) Feet clearance (penalize deviation from swing height profile)
+        # 1) Feet clearance
         x = torch.clip((self.foot_indices * 2.0) - 1.0, 0.0, 1.0) * 2.0
         phases = 1.0 - torch.abs(1.0 - x)  # (N,4), peaked mid-swing
 
@@ -209,7 +227,7 @@ class Rob6323Go2Env(DirectRLEnv):
         feet_clearance_err = torch.square(target_height - foot_height) * swing_mask
         feet_clearance = torch.sum(feet_clearance_err, dim=1)  # (N,)
 
-        # 2) Penalize contact force during swing 
+        # 2) Penalize contact force during swing
         net_forces_hist = self._contact_sensor.data.net_forces_w_history  # (N, H, bodies, 3)
         foot_forces_hist = torch.norm(net_forces_hist[:, :, self._feet_ids_sensor, :], dim=-1)  # (N, H, 4)
         foot_forces = torch.max(foot_forces_hist, dim=1)[0]  # (N,4)
@@ -267,6 +285,13 @@ class Rob6323Go2Env(DirectRLEnv):
         self.robot.reset(env_ids)
         super()._reset_idx(env_ids)
 
+        # ---------------------------
+        # BONUS (from your bonus code):
+        # friction randomization on reset
+        # ---------------------------
+        self.mu_v[env_ids] = torch.rand(len(env_ids), self.mu_v.shape[1], device=self.device) * 0.3
+        self.f_s[env_ids] = torch.rand(len(env_ids), self.f_s.shape[1], device=self.device) * 2.5
+
         if len(env_ids) == self.num_envs:
             self.episode_length_buf[:] = torch.randint_like(self.episode_length_buf, high=int(self.max_episode_length))
 
@@ -282,6 +307,11 @@ class Rob6323Go2Env(DirectRLEnv):
         joint_pos = self.robot.data.default_joint_pos[env_ids]
         joint_vel = self.robot.data.default_joint_vel[env_ids]
         default_root_state = self.robot.data.default_root_state[env_ids]
+
+        # ---------------------------
+        # BONUS 2 (respawn using terrain origins):
+        # keep this (it’s the correct fix for terrain cloning)
+        # ---------------------------
         default_root_state[:, :3] += self._terrain.env_origins[env_ids]
 
         self.robot.write_root_pose_to_sim(default_root_state[:, :7], env_ids)
@@ -372,13 +402,10 @@ class Rob6323Go2Env(DirectRLEnv):
 
         self.foot_indices = torch.remainder(shaped, 1.0)
 
-        # desired_contact_states smoothing
-        # smooth stance/swing instead of hard 0/1:
-        
+        # desired_contact_states smoothing (tutorial kappa=0.07)
         kappa = float(getattr(self.cfg, "contact_smoothing_kappa", 0.07))
         smoothing_cdf_start = torch.distributions.normal.Normal(0.0, kappa).cdf
 
-        
         for i in range(4):
             p = torch.remainder(self.foot_indices[:, i], 1.0)
             self.desired_contact_states[:, i] = (

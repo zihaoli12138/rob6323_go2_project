@@ -340,3 +340,15 @@ v5 did not work
     * Terrain consists of 100% random uniform noise with 1–5cm bumps to test proprioceptive robustness.
     * Implemented terrain-relative spawning (env_origins) to ensure stable initialization on the bumpy surface.
 * Result: Job 135309 successfully completed over 1 hour of training on procedural terrain, demonstrating a stable, high-clearance trot (0.38m target height) that is robust to geometric noise.
+
+### v2_with_TA_fix: Gait Smoothing & Compliance
+
+* Goal: Refine the locomotion gait by implementing contact state smoothing and mandatory TA reward terms on top of the stable v10 baseline.
+* Implementation:
+    * Contact Smoothing: Replaced the hard-binary contact schedule with a smoothed version using a Normal CDF ($\kappa=0.07$). This allows for differentiable transitions between stance and swing phases.
+    * Foot Clearance Arc: Integrated the phase-based equation to enforce a target $8\text{cm}$ swing height.
+    * haped Contact Force: Added exponential force penalties to prevent the robot from dragging its feet during the swing phase.
+* Observation Space: Restored to the stable 52 dimensions (Proprioceptive + Clock) to ensure high-frequency training stability on the Greene cluster.
+
+### bonus_part2_Ta_version_v1
+* Combine bonus 2 with the last version.
