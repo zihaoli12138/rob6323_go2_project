@@ -161,14 +161,14 @@ class Rob6323Go2Env(DirectRLEnv):
         return {"policy": obs}
 
     def _get_rewards(self) -> torch.Tensor:
-        # ---------------- tracking ----------------
+        # tracking 
         lin_vel_error = torch.sum((self._commands[:, :2] - self.robot.data.root_lin_vel_b[:, :2]) ** 2, dim=1)
         lin_vel_error_mapped = torch.exp(-lin_vel_error / 0.25)
 
         yaw_rate_error = (self._commands[:, 2] - self.robot.data.root_ang_vel_b[:, 2]) ** 2
         yaw_rate_error_mapped = torch.exp(-yaw_rate_error / 0.25)
 
-        # ---------------- baseline: action smoothness (1st + 2nd derivative) ----------------
+        # baseline: action smoothness 
         rew_action_rate = torch.sum((self._actions - self.last_actions[:, :, 0]) ** 2, dim=1) * (self.cfg.action_scale**2)
         rew_action_rate += torch.sum(
             (self._actions - 2.0 * self.last_actions[:, :, 0] + self.last_actions[:, :, 1]) ** 2, dim=1
@@ -177,11 +177,11 @@ class Rob6323Go2Env(DirectRLEnv):
         self.last_actions = torch.roll(self.last_actions, shifts=1, dims=2)
         self.last_actions[:, :, 0] = self._actions
 
-        # ---------------- gait + Raibert ----------------
+        # gait + Raibert
         self._step_contact_targets()
         rew_raibert_heuristic = self._reward_raibert_heuristic()
 
-        # ---------------- base level + base height (exp shaping) ----------------
+        # base level + base height
         gravity_xy_sq = torch.sum(self.robot.data.projected_gravity_b[:, :2] ** 2, dim=1)
         base_level_mapped = torch.exp(-gravity_xy_sq / self.cfg.base_level_exp_denom)
 
@@ -189,13 +189,13 @@ class Rob6323Go2Env(DirectRLEnv):
         height_err_sq = (base_height - self.cfg.base_height_target) ** 2
         height_mapped = torch.exp(-height_err_sq / self.cfg.base_height_exp_denom)
 
-        # ---------------- anti-hop regularizers ----------------
+        # anti-hop regularizers
         lin_vel_z_l2 = self.robot.data.root_lin_vel_b[:, 2] ** 2
         ang_vel_xy_l2 = torch.sum(self.robot.data.root_ang_vel_b[:, :2] ** 2, dim=1)
         torque_l2 = torch.sum(self._torques ** 2, dim=1)
         dof_vel_l2 = torch.sum(self.robot.data.joint_vel ** 2, dim=1)
 
-        # ---------------- TA rewards: feet clearance + swing-contact force ----------------
+        # TA rewards: feet clearance + swing-contact force 
         # desired_contact_states is SMOOTHED in _step_contact_targets; use it as a soft mask
         swing_mask = 1.0 - self.desired_contact_states  # (N,4)
 
@@ -209,7 +209,7 @@ class Rob6323Go2Env(DirectRLEnv):
         feet_clearance_err = torch.square(target_height - foot_height) * swing_mask
         feet_clearance = torch.sum(feet_clearance_err, dim=1)  # (N,)
 
-        # 2) Penalize contact force during swing (use contact sensor forces)
+        # 2) Penalize contact force during swing 
         net_forces_hist = self._contact_sensor.data.net_forces_w_history  # (N, H, bodies, 3)
         foot_forces_hist = torch.norm(net_forces_hist[:, :, self._feet_ids_sensor, :], dim=-1)  # (N, H, 4)
         foot_forces = torch.max(foot_forces_hist, dim=1)[0]  # (N,4)
@@ -225,12 +225,12 @@ class Rob6323Go2Env(DirectRLEnv):
             "raibert_heuristic": rew_raibert_heuristic * self.cfg.raibert_heuristic_reward_scale * self.step_dt,
             "base_level_exp": base_level_mapped * self.cfg.base_level_reward_scale * self.step_dt,
             "base_height_exp": height_mapped * self.cfg.base_height_reward_scale * self.step_dt,
-            # anti-hop (costs => cfg scales are negative)
+            # anti-hop
             "lin_vel_z_l2": lin_vel_z_l2 * self.cfg.lin_vel_z_reward_scale * self.step_dt,
             "ang_vel_xy_l2": ang_vel_xy_l2 * self.cfg.ang_vel_xy_reward_scale * self.step_dt,
             "torque_l2": torque_l2 * self.cfg.torque_reward_scale * self.step_dt,
             "dof_vel_l2": dof_vel_l2 * self.cfg.dof_vel_reward_scale * self.step_dt,
-            # TA rewards (costs => cfg scales are negative)
+            # TA rewards
             "feet_clearance": feet_clearance * self.cfg.feet_clearance_reward_scale * self.step_dt,
             "tracking_contacts_shaped_force": tracking_contacts_shaped_force
             * self.cfg.tracking_contacts_shaped_force_reward_scale
@@ -339,7 +339,7 @@ class Rob6323Go2Env(DirectRLEnv):
         arrow_quat = math_utils.quat_mul(self.robot.data.root_quat_w, arrow_quat)
         return arrow_scale, arrow_quat
 
-    # ---------------- gait + Raibert ----------------
+    # gait + Raibert
     def _step_contact_targets(self):
         frequencies = 3.0
         phase_offset = 0.5
@@ -372,13 +372,13 @@ class Rob6323Go2Env(DirectRLEnv):
 
         self.foot_indices = torch.remainder(shaped, 1.0)
 
-        # -------- desired_contact_states smoothing (TA/tutorial kappa block) --------
+        # desired_contact_states smoothing
         # smooth stance/swing instead of hard 0/1:
-        # desired_contact_states[:, i] ~ 1 in stance half-cycle, ~0 in swing half-cycle, with smooth transitions
+        
         kappa = float(getattr(self.cfg, "contact_smoothing_kappa", 0.07))
         smoothing_cdf_start = torch.distributions.normal.Normal(0.0, kappa).cdf
 
-        # NOTE: this matches the tutorial pattern: two windows to handle periodic wrap-around
+        
         for i in range(4):
             p = torch.remainder(self.foot_indices[:, i], 1.0)
             self.desired_contact_states[:, i] = (

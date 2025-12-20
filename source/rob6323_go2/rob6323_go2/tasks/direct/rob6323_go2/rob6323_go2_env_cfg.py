@@ -32,7 +32,7 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     debug_vis = True
 
     # ---------------------------
-    # Rewards (baseline + yours)
+    # Rewards baseline
     # ---------------------------
     lin_vel_reward_scale = 1.0
     yaw_rate_reward_scale = 0.5
@@ -66,7 +66,7 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     dof_vel_reward_scale = -1.0e-4     # sum(qd^2) (small)
 
     # ---------------------------
-    # New (TA rewards): feet clearance + swing-contact force
+    # TA rewards: feet clearance + swing-contact force
     # ---------------------------
 
     # Feet clearance: match a swing-foot height profile (penalty, so negative)
