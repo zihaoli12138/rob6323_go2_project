@@ -37,7 +37,7 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     lin_vel_reward_scale = 1.0
     yaw_rate_reward_scale = 0.5
 
-    # baseline: action smoothness (note: negative)
+    # baseline: action smoothness (note: negative; TA suggests -0.0001 or smaller)
     action_rate_reward_scale = -0.0001
 
     # baseline: Raibert heuristic (note: negative; set to 0.0 to disable)
@@ -55,36 +55,42 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     base_height_target = 0.35
 
     # termination threshold
-    base_height_min = 0.22
+    base_height_min = 0.22  # terminate if base < 22 cm
 
     # ---------------------------
-    # Anti-hop regularizers (costs)
+    # Anti-hop regularizers
     # ---------------------------
-    lin_vel_z_reward_scale = -2.0       # (v_z)^2
-    ang_vel_xy_reward_scale = -0.05     # (ωx^2 + ωy^2)
-    torque_reward_scale = -2.0e-5       # sum(τ^2)
-    dof_vel_reward_scale = -1.0e-4      # sum(qd^2)
+    lin_vel_z_reward_scale = -2.0      # (v_z)^2
+    ang_vel_xy_reward_scale = -0.05    # (ωx^2 + ωy^2)
+    torque_reward_scale = -2.0e-5      # sum(τ^2)  (VERY small)
+    dof_vel_reward_scale = -1.0e-4     # sum(qd^2) (small)
 
     # ---------------------------
-    # TA-suggested gait/contact shaping
+    # New (TA rewards): feet clearance + swing-contact force
     # ---------------------------
-    # Feet clearance: penalize (target_height - foot_height)^2 during swing
-    # Use negative scale because it's a cost (same pattern as your other regularizers)
-    feet_clearance_reward_scale = -2.0
 
-    # Swing contact penalty: penalize nonzero contact force when desired_contact==0
-    # The formula itself is negative; keep this positive to increase penalty magnitude.
-    tracking_contacts_shaped_force_reward_scale = 1.0
-    tracking_contacts_force_denom = 100.0  # matches TA snippet
+    # Feet clearance: match a swing-foot height profile (penalty, so negative)
+    feet_clearance_reward_scale = -0.05
 
-    # clearance profile parameters (TA snippet uses 0.08 * phases + 0.02)
-    foot_clearance_height = 0.08
-    foot_clearance_offset = 0.02
+    # Penalize foot contact force during swing (penalty, so negative)
+    tracking_contacts_shaped_force_reward_scale = -0.02
 
-    # your v1 controlled command sampling
+    # Swing foot height profile (meters)
+    foot_clearance_peak = 0.08   # peak extra height during swing
+    foot_radius_offset = 0.02    # offset for foot radius (~2cm)
+
+    # Contact schedule smoothing (used to compute desired_contact_states smoothly)
+    contact_smoothing_kappa = 0.07
+
+    # Denominator in exp(-force^2 / denom) for shaped-force penalty
+    contact_force_exp_denom = 100.0
+
+    # ---------------------------
+    # Command sampling
+    # ---------------------------
     command_lin_vel_x_range = (-1.0, 1.0)
     command_lin_vel_y_range = (-0.05, 0.05)
-    command_yaw_rate_range = (-1.0, 1.0)
+    command_yaw_rate_range  = (-1.0, 1.0)
 
     # ---------------------------
     # Simulation
@@ -127,8 +133,8 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
         joint_names_expr=[".*_hip_joint", ".*_thigh_joint", ".*_calf_joint"],
         effort_limit=23.5,
         velocity_limit=30.0,
-        stiffness=0.0,
-        damping=0.0,
+        stiffness=0.0,  # disable implicit P-gain
+        damping=0.0,    # disable implicit D-gain
     )
 
     # ---------------------------
